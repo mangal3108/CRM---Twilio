@@ -1223,11 +1223,16 @@ public class LeadService {
 
     @CacheEvict(value = "leads-list", allEntries = true)
     public Map<String, Object> callLeadNow(String id, String script) {
+        return callLeadNow(id, script, null, null, null);
+    }
+
+    @CacheEvict(value = "leads-list", allEntries = true)
+    public Map<String, Object> callLeadNow(String id, String script, String setup, String fromNumber, String toNumber) {
         Lead lead = leadRepository.findByIdAndTenantIdAndDeletedFalse(id, tenantId())
             .orElseThrow(() -> new ResourceNotFoundException("Lead not found: " + id));
         ensureLeadVisible(lead);
 
-        String phone = lead.getPhone() == null ? "" : lead.getPhone().trim();
+        String phone = (toNumber != null && !toNumber.isBlank()) ? toNumber.trim() : (lead.getPhone() == null ? "" : lead.getPhone().trim());
         if (phone.isBlank()) {
             throw new IllegalStateException("Lead phone number is missing.");
         }
@@ -1243,19 +1248,30 @@ public class LeadService {
                 + ". Is this a good time to talk?";
         }
 
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("leadId", lead.getId());
+        metadata.put("leadName", lead.getName() != null ? lead.getName() : "");
+        metadata.put("company", lead.getCompany() != null ? lead.getCompany() : "");
+        metadata.put("service", lead.getService() != null ? lead.getService() : "");
+        metadata.put("source", lead.getSource() != null ? lead.getSource().name() : "OTHER");
+        if (setup != null && !setup.isBlank()) {
+            metadata.put("setup", setup.trim());
+            metadata.put("provider", setup.trim());
+        }
+        if (fromNumber != null && !fromNumber.isBlank()) {
+            metadata.put("fromNumber", fromNumber.trim());
+        }
+        if (toNumber != null && !toNumber.isBlank()) {
+            metadata.put("toNumber", toNumber.trim());
+        }
+
         communicationService.sendLeadVoiceCall(
             lead.getId(),
             lead.getName(),
             phone,
             callScript,
             "manual_lead_call",
-            Map.of(
-                "leadId", lead.getId(),
-                "leadName", lead.getName() != null ? lead.getName() : "",
-                "company", lead.getCompany() != null ? lead.getCompany() : "",
-                "service", lead.getService() != null ? lead.getService() : "",
-                "source", lead.getSource() != null ? lead.getSource().name() : "OTHER"
-            )
+            metadata
         );
         lead.setLastContactedAt(LocalDateTime.now());
         leadChangeAuditService.save(lead);
@@ -1263,7 +1279,9 @@ public class LeadService {
         return Map.of(
             "message", "Call queued successfully",
             "leadId", lead.getId(),
-            "phone", phone
+            "phone", phone,
+            "setup", setup != null ? setup : "",
+            "fromNumber", fromNumber != null ? fromNumber : ""
         );
     }
 

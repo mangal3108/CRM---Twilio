@@ -29,17 +29,19 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class IntegrationService {
 
-    private static final Map<String, List<String>> REQUIRED_FIELDS = Map.of(
-        "facebook", List.of("pageId", "accessToken"),
-        "instagram", List.of("igAccountId", "accessToken"),
-        "reddit", List.of("clientId", "clientSecret", "refreshToken", "username"),
-        "whatsapp", List.of(),
-        "voice_call_agent", List.of(),
-        "gmail", List.of("clientId", "clientSecret", "refreshToken"),
-        "google_calendar", List.of("clientId", "clientSecret"),
-        "openai", List.of("apiKey"),
-        "linkedin", List.of("clientId", "clientSecret"),
-        "google_sheets_leads", List.of("spreadsheetId", "sheetName")
+    private static final Map<String, List<String>> REQUIRED_FIELDS = Map.ofEntries(
+        Map.entry("facebook", List.of("pageId", "accessToken")),
+        Map.entry("instagram", List.of("igAccountId", "accessToken")),
+        Map.entry("reddit", List.of("clientId", "clientSecret", "refreshToken", "username")),
+        Map.entry("whatsapp", List.of()),
+        Map.entry("voice_call_agent", List.of()),
+        Map.entry("twilio", List.of("accountSid", "authToken")),
+        Map.entry("gmail", List.of("clientId", "clientSecret", "refreshToken")),
+        Map.entry("google_calendar", List.of("clientId", "clientSecret")),
+        Map.entry("openai", List.of("apiKey")),
+        Map.entry("mongodb", List.of("uri")),
+        Map.entry("linkedin", List.of("clientId", "clientSecret")),
+        Map.entry("google_sheets_leads", List.of("spreadsheetId", "sheetName"))
     );
 
     private static final Map<String, String> INTEGRATION_ALIASES = Map.of(
@@ -48,7 +50,7 @@ public class IntegrationService {
     );
 
     private static final Set<String> SENSITIVE_KEYS = Set.of(
-        "apikey", "api_key", "access_token", "token", "secret", "password", "refresh_token", "webhooksecret"
+        "apikey", "api_key", "access_token", "token", "secret", "password", "refresh_token", "webhooksecret", "authtoken", "auth_token"
     );
 
     private final ObjectProvider<LeadService> leadServiceProvider;
@@ -112,8 +114,14 @@ public class IntegrationService {
         if ("whatsapp".equals(normalizedId)) {
             return testWhatsAppConnection(testValues);
         }
+        if ("twilio".equals(normalizedId)) {
+            return testTwilioConnection(testValues);
+        }
         if ("openai".equals(normalizedId)) {
             return testOpenAIConnection(testValues);
+        }
+        if ("mongodb".equals(normalizedId)) {
+            return testMongoConnection(testValues);
         }
 
         return Map.of(
@@ -213,6 +221,64 @@ public class IntegrationService {
         return required;
     }
 
+    private Map<String, Object> testTwilioConnection(Map<String, String> values) {
+        String accountSid = trim(values.get("accountSid"));
+        String authToken = trim(values.get("authToken"));
+        if (accountSid.isBlank() || authToken.isBlank()) {
+            throw new IllegalStateException("Twilio Account SID and Auth Token are required.");
+        }
+
+        String url = "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + ".json";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(accountSid, authToken);
+
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                url,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                Map.class
+            );
+            Map<?, ?> body = response.getBody() == null ? Map.of() : response.getBody();
+            String friendlyName = trim(String.valueOf(body.get("friendly_name")));
+            String status = trim(String.valueOf(body.get("status")));
+
+            List<String> numbers = new ArrayList<>();
+            try {
+                String numbersUrl = "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + "/IncomingPhoneNumbers.json";
+                ResponseEntity<Map> numResp = restTemplate.exchange(
+                    numbersUrl,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    Map.class
+                );
+                Map<?, ?> numBody = numResp.getBody() == null ? Map.of() : numResp.getBody();
+                Object incomingList = numBody.get("incoming_phone_numbers");
+                if (incomingList instanceof List<?> list) {
+                    for (Object item : list) {
+                        if (item instanceof Map<?, ?> map) {
+                            String pn = trim(String.valueOf(map.get("phone_number")));
+                            if (!pn.isBlank()) numbers.add(pn);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            return Map.of(
+                "ok", true,
+                "message", "Twilio connected successfully for account: " + (friendlyName.isBlank() ? accountSid : friendlyName) + (numbers.isEmpty() ? "" : " (" + numbers.size() + " active number(s) detected)"),
+                "integration", "twilio",
+                "accountStatus", status,
+                "phoneNumbers", numbers
+            );
+        } catch (HttpStatusCodeException ex) {
+            String errorMsg = ex.getResponseBodyAsString();
+            throw new IllegalStateException("Twilio verification failed (HTTP " + ex.getStatusCode().value() + "): " + errorMsg);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Twilio connection failed: " + ex.getMessage());
+        }
+    }
+
     private Map<String, Object> testWhatsAppConnection(Map<String, String> values) {
         String provider = trim(values.get("provider")).toLowerCase(Locale.ROOT);
         String apiToken = firstNonBlank(values.get("apiToken"), values.get("bearerToken"));
@@ -298,6 +364,40 @@ public class IntegrationService {
                 throw new IllegalStateException("OpenAI rejected the test because the key is rate limited or has no available quota. Try again later or check the OpenAI dashboard.");
             }
             throw new IllegalStateException("OpenAI connection test failed (HTTP " + ex.getStatusCode().value() + "): " + providerMessage);
+        }
+    }
+
+    private Map<String, Object> testMongoConnection(Map<String, String> values) {
+        String uri = trim(values.get("uri"));
+        if (uri.isBlank()) {
+            throw new IllegalStateException("MongoDB connection URI is required.");
+        }
+        String database = trim(values.get("database"));
+        if (database.isBlank()) {
+            database = "nexacrm";
+        }
+
+        try (com.mongodb.client.MongoClient client = com.mongodb.client.MongoClients.create(uri)) {
+            com.mongodb.client.MongoDatabase db = client.getDatabase(database);
+            long start = System.currentTimeMillis();
+            db.runCommand(new org.bson.Document("ping", 1));
+            long latencyMs = System.currentTimeMillis() - start;
+
+            List<String> collections = new ArrayList<>();
+            for (String colName : db.listCollectionNames()) {
+                collections.add(colName);
+            }
+
+            return Map.of(
+                "ok", true,
+                "message", "MongoDB connection verified successfully! Ping latency: " + latencyMs + "ms. Target DB: '" + database + "' (" + collections.size() + " collections found).",
+                "integration", "mongodb",
+                "database", database,
+                "latencyMs", latencyMs,
+                "collectionsCount", collections.size()
+            );
+        } catch (Exception ex) {
+            throw new IllegalStateException("MongoDB connection test failed: " + ex.getMessage());
         }
     }
 

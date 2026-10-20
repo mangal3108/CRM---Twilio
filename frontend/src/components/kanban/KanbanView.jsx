@@ -29,6 +29,7 @@ import { PERMISSIONS, hasPermission } from '../../utils/permissions'
 import LeadActivitiesModal from '../LeadActivitiesModal'
 import PaginatedSelect from '../ui/PaginatedSelect'
 import ScreenModalPortal from '../ui/ScreenModalPortal'
+import CallLeadModal from '../leads/CallLeadModal'
 import CopyableContact from '../ui/CopyableContact'
 import DateRangeFilter from '../ui/DateRangeFilter'
 import { anyFieldMatchesSearch } from '../../utils/search'
@@ -1013,6 +1014,7 @@ export default function KanbanPage() {
   const [dateRange, setDateRange] = useState(emptyDateRange)
   const [teamMembers, setTeamMembers] = useState([])
   const [callingLeadId, setCallingLeadId] = useState(null)
+  const [callingLeadModal, setCallingLeadModal] = useState(null)
   const [activitiesLead, setActivitiesLead] = useState(null)
   const [activityStateByLeadId, setActivityStateByLeadId] = useState({})
   const [activityTabByLeadId, setActivityTabByLeadId] = useState({})
@@ -1471,17 +1473,16 @@ export default function KanbanPage() {
   }
 
   /* ── Call ─────────────────────────────────────────────────── */
-  const handleCallLead = async (lead) => {
-    if (!canCall || !lead?.phone) return
-    try {
-      setCallingLeadId(lead.id)
-      await leadsAPI.callNow(lead.id, {})
-      toast.success('Call queued')
-    } catch (err) {
-      toast.error(err?.message || 'Failed to place call')
-    } finally {
-      setCallingLeadId((prev) => (prev === lead.id ? null : prev))
+  const handleCallLead = (lead) => {
+    if (!canCall) {
+      toast.error('You do not have permission to place calls.')
+      return
     }
+    if (!lead?.phone) {
+      toast.error('This lead has no phone number.')
+      return
+    }
+    setCallingLeadModal(lead)
   }
 
   const handleWhatsApp = (lead) => {
@@ -1787,6 +1788,26 @@ export default function KanbanPage() {
             initialActiveTab={activityTabByLeadId[activitiesLead.id] ?? Math.max(0, getLeadCurrentStage(getActivityState(activitiesLead.id)))}
             onActiveTabChange={handleActivityTabChange}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {callingLeadModal && (
+          <ScreenModalPortal>
+            <CallLeadModal
+              lead={callingLeadModal}
+              onClose={() => setCallingLeadModal(null)}
+              onCallSuccess={() => {
+                const targetLead = callingLeadModal
+                const nowIso = new Date().toISOString()
+                patchLeadLocal(targetLead.id, {
+                  lastContactedAtTs: nowIso,
+                  lastActivityAtTs: nowIso,
+                })
+                setCallingLeadModal(null)
+              }}
+            />
+          </ScreenModalPortal>
         )}
       </AnimatePresence>
     </div>

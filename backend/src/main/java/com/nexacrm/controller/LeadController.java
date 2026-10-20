@@ -343,7 +343,10 @@ public class LeadController {
             @PathVariable String id,
             @RequestBody(required = false) Map<String, String> body) {
         String script = body != null ? body.get("script") : null;
-        return ResponseEntity.ok(leadService.callLeadNow(id, script));
+        String setup = body != null ? (body.get("setup") != null ? body.get("setup") : body.get("provider")) : null;
+        String fromNumber = body != null ? body.get("fromNumber") : null;
+        String toNumber = body != null ? body.get("toNumber") : null;
+        return ResponseEntity.ok(leadService.callLeadNow(id, script, setup, fromNumber, toNumber));
     }
 
     private String pickString(Map<String, Object> payload, String... keys) {

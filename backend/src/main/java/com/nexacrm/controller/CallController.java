@@ -28,6 +28,13 @@ public class CallController {
     private final LeadService leadService;
     private final CallAgentService callAgentService;
 
+    @GetMapping("/options")
+    @PreAuthorize("hasAuthority('leads.read') or hasAuthority('communications.send')")
+    @Operation(summary = "Get available call setups and caller phone numbers")
+    public ResponseEntity<Map<String, Object>> getCallOptions() {
+        return ResponseEntity.ok(callAgentService.getCallOptions());
+    }
+
     @PostMapping("/trigger/{leadId}")
     @PreAuthorize("hasAuthority('communications.send')")
     @Operation(summary = "Trigger outbound AI call for a lead")
@@ -36,7 +43,10 @@ public class CallController {
         @RequestBody(required = false) Map<String, String> body
     ) {
         String script = body != null ? body.get("script") : null;
-        return ResponseEntity.ok(leadService.callLeadNow(leadId, script));
+        String setup = body != null ? (body.get("setup") != null ? body.get("setup") : body.get("provider")) : null;
+        String fromNumber = body != null ? body.get("fromNumber") : null;
+        String toNumber = body != null ? body.get("toNumber") : null;
+        return ResponseEntity.ok(leadService.callLeadNow(leadId, script, setup, fromNumber, toNumber));
     }
 
     @PostMapping("/webhook")
@@ -70,7 +80,12 @@ public class CallController {
     @PostMapping("/retry/{callId}")
     @PreAuthorize("hasAuthority('communications.send')")
     @Operation(summary = "Retry one previous call by call log id")
-    public ResponseEntity<Map<String, Object>> retryCall(@PathVariable String callId) {
-        return ResponseEntity.ok(callAgentService.retryCall(callId));
+    public ResponseEntity<Map<String, Object>> retryCall(
+        @PathVariable String callId,
+        @RequestBody(required = false) Map<String, String> body
+    ) {
+        String setup = body != null ? (body.get("setup") != null ? body.get("setup") : body.get("provider")) : null;
+        String fromNumber = body != null ? body.get("fromNumber") : null;
+        return ResponseEntity.ok(callAgentService.retryCall(callId, setup, fromNumber));
     }
 }

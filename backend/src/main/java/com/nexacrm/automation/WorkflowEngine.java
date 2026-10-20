@@ -30,6 +30,7 @@ import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -367,9 +368,11 @@ public class WorkflowEngine {
     }
 
     private ActionResult sendCallAction(String payload, Map<String, Object> context) {
-        String[] parts = payload.split("\\|", 2);
+        String[] parts = payload.split("\\|", 4);
         String recipient = normalize(parts.length > 0 ? parts[0] : "");
         String script = normalize(parts.length > 1 ? parts[1] : "");
+        String setup = normalize(parts.length > 2 ? parts[2] : "");
+        String fromNumber = normalize(parts.length > 3 ? parts[3] : "");
         if (!StringUtils.hasText(recipient)) {
             recipient = normalize((String) context.get("leadPhone"));
         }
@@ -379,8 +382,18 @@ public class WorkflowEngine {
         if (!StringUtils.hasText(script)) {
             script = "Hello, this is NexaCRM calling about your enquiry.";
         }
-        communicationService.sendChannelMessage("call", recipient, "", script);
-        return new ActionResult(true, "Call queued to " + recipient);
+        String leadId = normalize((String) context.get("leadId"));
+        String leadName = normalize((String) context.get("leadName"));
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (StringUtils.hasText(setup)) {
+            metadata.put("setup", setup);
+            metadata.put("provider", setup);
+        }
+        if (StringUtils.hasText(fromNumber)) {
+            metadata.put("fromNumber", fromNumber);
+        }
+        communicationService.sendLeadVoiceCall(leadId, leadName, recipient, script, "workflow_automation", metadata);
+        return new ActionResult(true, "Call queued to " + recipient + (StringUtils.hasText(setup) ? " via " + setup : ""));
     }
 
     private ActionResult sendWhatsAppAction(String payload, Map<String, Object> context) {

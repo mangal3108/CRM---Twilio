@@ -26,6 +26,7 @@ import { PERMISSIONS, hasPermission } from '../../utils/permissions'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import ScreenModalPortal from '../ui/ScreenModalPortal'
+import CallLeadModal from './CallLeadModal'
 import CopyableContact from '../ui/CopyableContact'
 import DateRangeFilter from '../ui/DateRangeFilter'
 import { emptyDateRange, hasDateRangeFilter, isWithinDateRange } from '../../utils/dateRangeFilter'
@@ -1183,6 +1184,7 @@ export default function LeadsPage() {
   const [callOutcomeByLeadId, setCallOutcomeByLeadId] = useState({})
   const [activityTabByLeadId, setActivityTabByLeadId] = useState({})
   const [callingLeadId, setCallingLeadId] = useState(null)
+  const [callingLeadModal, setCallingLeadModal] = useState(null)
   const [leadStages, setLeadStages] = useState({})
   const [timeTick, setTimeTick]             = useState(Date.now())
   const importRef                           = useRef(null)
@@ -1482,7 +1484,7 @@ export default function LeadsPage() {
     e.target.value = ''
   }
 
-  const handleCallLead = async (lead) => {
+  const handleCallLead = (lead) => {
     if (!canCall) {
       toast.error('You do not have permission to place calls.')
       return
@@ -1491,22 +1493,7 @@ export default function LeadsPage() {
       toast.error('This lead has no phone number.')
       return
     }
-
-    try {
-      setCallingLeadId(lead.id)
-      const res = await leadsAPI.callNow(lead.id, {})
-      const nowIso = new Date().toISOString()
-      patchLeadLocal(lead.id, {
-        lastContactedAtTs: nowIso,
-        lastActivityAtTs: nowIso,
-      })
-      toast.success(res?.message || 'Call queued successfully')
-      setCallOutcomeLead(lead)
-    } catch (err) {
-      toast.error(err?.message || 'Failed to place call')
-    } finally {
-      setCallingLeadId((prev) => (prev === lead.id ? null : prev))
-    }
+    setCallingLeadModal(lead)
   }
 
   const handleSaveCallOutcome = async ({ lead, outcome, note, callbackAt, assignedTo }) => {
@@ -2068,6 +2055,28 @@ export default function LeadsPage() {
         {waLead && (
           <ScreenModalPortal>
             <WhatsAppModal lead={waLead} onClose={() => setWaLead(null)} />
+          </ScreenModalPortal>
+        )}
+      </AnimatePresence>
+
+      {/* Choose Call Setup & Phone Number Modal */}
+      <AnimatePresence>
+        {callingLeadModal && (
+          <ScreenModalPortal>
+            <CallLeadModal
+              lead={callingLeadModal}
+              onClose={() => setCallingLeadModal(null)}
+              onCallSuccess={(res) => {
+                const targetLead = callingLeadModal
+                const nowIso = new Date().toISOString()
+                patchLeadLocal(targetLead.id, {
+                  lastContactedAtTs: nowIso,
+                  lastActivityAtTs: nowIso,
+                })
+                setCallingLeadModal(null)
+                setCallOutcomeLead(targetLead)
+              }}
+            />
           </ScreenModalPortal>
         )}
       </AnimatePresence>

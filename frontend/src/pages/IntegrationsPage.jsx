@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X, CheckCircle2, ExternalLink, Copy, Eye, EyeOff,
-  RefreshCw, Zap, Link2, Shield, Linkedin, Sheet, PhoneCall, Sparkles
+  RefreshCw, Zap, Link2, Shield, Linkedin, Sheet, PhoneCall, Sparkles, Database
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useIntegrationsStore } from '../store/integrationsStore'
@@ -102,38 +102,69 @@ const INTEGRATIONS = [
   },
   {
     id: 'voice_call_agent', name: 'Voice Call Agent', category: 'Messaging',
-    tagline: 'Auto-call new leads using Bolna or webhook providers',
-    description: 'Run outbound AI calls with Bolna directly from NexaCRM, or keep using any webhook-based calling agent.',
-    features: ['Bolna outbound calls', 'Auto-call on lead create', 'Webhook fallback mode', 'Transcript + call activity logging'],
+    tagline: 'AI voice calls using Bolna (with Twilio telephony) or custom webhooks',
+    description: 'Run outbound AI calls with Bolna directly from NexaCRM with Twilio telephony integration, or keep using any webhook-based calling agent.',
+    features: ['Bolna + Twilio AI calls', 'Choose caller phone numbers', 'Auto-call on lead create', 'Transcripts & Call Intelligence'],
     color: '#7C3AED', bg: '#F5F1FF',
     authType: 'apikey',
     docsUrl: 'https://www.bolna.ai/docs/api-reference/calls/make',
     defaultValues: {
       enabled: 'true',
       autoCallOnLeadCreate: 'true',
-      provider: 'bolna',
+      provider: 'bolna_twilio',
       bolnaApiUrl: 'https://api.bolna.ai',
     },
     fields: [
-      { key: 'provider', label: 'Provider (bolna or webhook)', placeholder: 'bolna', hint: 'Use bolna for direct API-based outbound calls from backend' },
-      { key: 'bolnaApiUrl', label: 'Bolna API URL (for provider=bolna)', placeholder: 'https://api.bolna.ai', hint: 'Defaults to https://api.bolna.ai' },
-      { key: 'bolnaApiKey', label: 'Bolna API Key (for provider=bolna)', placeholder: 'sk_live_...', secret: true },
-      { key: 'bolnaAgentId', label: 'Bolna Agent ID (for provider=bolna)', placeholder: '123e4567-e89b-12d3-a456-426655440000' },
+      { key: 'provider', label: 'Provider Setup (bolna_twilio, bolna, twilio, webhook)', placeholder: 'bolna_twilio', hint: 'Options: bolna_twilio (Bolna AI with Twilio), bolna (Bolna default), twilio (Direct Twilio), webhook' },
+      { key: 'bolnaApiUrl', label: 'Bolna API URL', placeholder: 'https://api.bolna.ai', hint: 'Defaults to https://api.bolna.ai' },
+      { key: 'bolnaApiKey', label: 'Bolna API Key', placeholder: 'sk_live_...', secret: true },
+      { key: 'bolnaAgentId', label: 'Bolna Agent ID', placeholder: '123e4567-e89b-12d3-a456-426655440000' },
       { key: 'bolnaVoiceId', label: 'Bolna Voice ID (optional)', placeholder: 'Sam', hint: 'Overrides default agent voice for this call' },
-      { key: 'callbackWebhookUrl', label: 'Callback Webhook URL (optional)', placeholder: 'https://your-backend.example.com/api/calls/webhook', hint: 'Where the AI worker should POST call outcomes; leave empty to skip callbacks unless configured on the server' },
+      { key: 'twilioAccountSid', label: 'Twilio Account SID (for Twilio/Bolna)', placeholder: 'AC...', hint: 'Optional if configured in Twilio integration' },
+      { key: 'twilioAuthToken', label: 'Twilio Auth Token (for Twilio/Bolna)', placeholder: '...', secret: true, hint: 'Optional if configured in Twilio integration' },
+      { key: 'twilioFromNumber', label: 'Twilio Caller Number (From)', placeholder: '+12055551234', hint: 'Twilio phone number to call leads from' },
+      { key: 'twilioPhoneNumbers', label: 'Selectable Twilio Phone Numbers', placeholder: '+12055551234, +12055559876', hint: 'Comma-separated caller phone numbers selectable during lead calls' },
+      { key: 'callbackWebhookUrl', label: 'Callback Webhook URL (optional)', placeholder: 'https://your-backend.example.com/api/calls/webhook', hint: 'Where the AI worker should POST call outcomes' },
       { key: 'webhookUrl', label: 'Webhook URL (for provider=webhook)', placeholder: 'https://your-agent.example.com/outbound-call' },
       { key: 'apiKey', label: 'Provider API Key (optional)', placeholder: 'sk_live_...', secret: true },
       { key: 'webhookSecret', label: 'Webhook Secret (optional)', placeholder: 'super-secret', secret: true },
       { key: 'agentId', label: 'Agent ID (optional)', placeholder: 'agent_123' },
-      { key: 'fromNumber', label: 'Caller Number (optional)', placeholder: '+911234567890', hint: 'For Bolna, this maps to from_phone_number when provided' },
+      { key: 'fromNumber', label: 'Caller Number (optional)', placeholder: '+911234567890', hint: 'Caller ID when placed' },
       { key: 'enabled', label: 'Enabled (optional, true/false)', placeholder: 'true' },
       { key: 'autoCallOnLeadCreate', label: 'Auto Call On New Lead (optional, true/false)', placeholder: 'true' },
       { key: 'autoAssignHotLead', label: 'Auto Assign Hot Lead (optional, true/false)', placeholder: 'true' },
-      { key: 'adminNotificationPhone', label: 'Admin WhatsApp Numbers for Notifications (up to 5)', placeholder: '918985419420, 919876543210', hint: 'Comma-separated WhatsApp numbers (up to 5) to receive new lead alerts + call intelligence reports. Falls back to tenant contact phone if empty.' },
+      { key: 'adminNotificationPhone', label: 'Admin WhatsApp Numbers for Notifications (up to 5)', placeholder: '918985419420, 919876543210', hint: 'Comma-separated WhatsApp numbers (up to 5)' },
       { key: 'agentName', label: 'Agent Name (optional)', placeholder: 'Riya from NexaCRM' },
       { key: 'scriptTemplate', label: 'Call Script Template (optional)', placeholder: 'Hi {leadName}, this is {agentName}...' },
     ],
     Icon: PhoneCall,
+  },
+  {
+    id: 'twilio', name: 'Twilio Telephony', category: 'Messaging',
+    tagline: 'Twilio phone lines & telephony for Bolna AI & Direct calls',
+    description: 'Connect your Twilio Account SID, Auth Token, and caller phone numbers. Works directly with Bolna AI voice agents to place real phone calls to leads and receive call updates.',
+    features: ['Bolna AI + Twilio telephony', 'Choose caller phone numbers', 'Twilio direct outbound calls', 'Call status callbacks'],
+    color: '#F22F46', bg: '#FFF1F2',
+    authType: 'apikey',
+    docsUrl: 'https://www.twilio.com/docs/voice',
+    defaultValues: {
+      accountSid: '',
+      authToken: '',
+      defaultFromNumber: '+12055551234',
+      phoneNumbers: '+12055551234',
+    },
+    fields: [
+      { key: 'accountSid', label: 'Twilio Account SID', placeholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', hint: 'Found in your Twilio Console Dashboard' },
+      { key: 'authToken', label: 'Twilio Auth Token', placeholder: 'your_auth_token', secret: true, hint: 'Found in your Twilio Console Dashboard' },
+      { key: 'defaultFromNumber', label: 'Default Caller Phone Number', placeholder: '+12055551234', hint: 'Primary phone number to place outbound calls from' },
+      { key: 'phoneNumbers', label: 'All Selectable Phone Numbers', placeholder: '+12055551234, +12055559876', hint: 'Comma-separated phone numbers you want to choose from when calling leads' },
+      { key: 'twimlAppSid', label: 'TwiML App SID (optional)', placeholder: 'APxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' },
+    ],
+    Icon: () => (
+      <svg viewBox="0 0 24 24" fill="#F22F46" className="w-7 h-7">
+        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3.5c4.694 0 8.5 3.806 8.5 8.5s-3.806 8.5-8.5 8.5-8.5-3.806-8.5-8.5 3.806-8.5 8.5-8.5zm-3.5 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-7 5a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>
+      </svg>
+    ),
   },
   {
     id: 'gmail', name: 'Gmail / Google', category: 'Email',
@@ -203,6 +234,24 @@ const INTEGRATIONS = [
     ],
     Icon: Sparkles,
   },
+  {
+    id: 'mongodb', name: 'MongoDB Atlas Database', category: 'Database',
+    tagline: 'Connect and verify MongoDB Atlas cluster',
+    description: 'Connect your MongoDB Atlas cloud database to power NexaCRM AI data persistence for leads, call logs, integrations, and automation workflows.',
+    features: ['Cluster connectivity test', 'Real-time ping latency', 'Collection inspection', 'Atlas multi-tenant sync'],
+    color: '#00ED64', bg: '#F0FDF4',
+    authType: 'apiKey',
+    docsUrl: 'https://www.mongodb.com/docs/atlas/',
+    defaultValues: {
+      uri: 'mongodb+srv://admin:123@internitecrm.t9xvmx7.mongodb.net/nexacrm?retryWrites=true&w=majority',
+      database: 'nexacrm'
+    },
+    fields: [
+      { key: 'uri',      label: 'MongoDB URI',      placeholder: 'mongodb+srv://admin:123@internitecrm.t9xvmx7.mongodb.net/nexacrm?retryWrites=true&w=majority', secret: true, hint: 'MongoDB Atlas connection string with credentials' },
+      { key: 'database', label: 'Database Name',    placeholder: 'nexacrm', hint: 'Default database name (e.g. nexacrm)' },
+    ],
+    Icon: Database,
+  },
 ]
 
 const CAT_COLORS = {
@@ -212,6 +261,7 @@ const CAT_COLORS = {
   'Calendar':     'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
   'Data Sync':    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
   'AI':           'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+  'Database':     'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
 }
 
 function getErrorMessage(err, fallback) {
@@ -279,9 +329,12 @@ function SetupModal({ integration, onClose }) {
     const baseKeys = ['provider']
     const bolnaKeys = ['bolnaApiUrl', 'bolnaApiKey', 'bolnaAgentId']
     const webhookKeys = ['webhookUrl']
+    const twilioKeys = ['twilioAccountSid', 'twilioAuthToken']
     const requiredKeys = providerMode === 'webhook'
       ? [...baseKeys, ...webhookKeys]
-      : [...baseKeys, ...bolnaKeys]
+      : providerMode === 'twilio'
+        ? [...baseKeys, ...twilioKeys]
+        : [...baseKeys, ...bolnaKeys]
 
     return integration.fields.filter(f => requiredKeys.includes(f.key))
   }

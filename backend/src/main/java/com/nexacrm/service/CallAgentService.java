@@ -377,7 +377,15 @@ public class CallAgentService {
         );
     }
 
+    public Map<String, Object> getCallOptions() {
+        return communicationService.getCallOptions();
+    }
+
     public Map<String, Object> retryCall(String callId) {
+        return retryCall(callId, null, null);
+    }
+
+    public Map<String, Object> retryCall(String callId, String setup, String fromNumber) {
         CommunicationRecord record = communicationRecordRepository
             .findByIdAndChannelIgnoreCase(callId, "CALL")
             .orElseThrow(() -> new ResourceNotFoundException("Call record not found: " + callId));
@@ -404,6 +412,13 @@ public class CallAgentService {
         if (!trim(record.getExternalId()).isBlank()) {
             metadata.put("previousExternalId", trim(record.getExternalId()));
         }
+        if (setup != null && !setup.isBlank()) {
+            metadata.put("setup", setup.trim());
+            metadata.put("provider", setup.trim());
+        }
+        if (fromNumber != null && !fromNumber.isBlank()) {
+            metadata.put("fromNumber", fromNumber.trim());
+        }
 
         communicationService.sendLeadVoiceCall(
             leadId,
@@ -424,7 +439,9 @@ public class CallAgentService {
             "message", "Call retried successfully",
             "callId", record.getId(),
             "leadId", leadId,
-            "phone", phone
+            "phone", phone,
+            "setup", setup != null ? setup : "",
+            "fromNumber", fromNumber != null ? fromNumber : ""
         );
     }
 

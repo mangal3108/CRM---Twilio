@@ -179,6 +179,18 @@ public class CommunicationService {
     @Value("${nexacrm.call-agent.callback-webhook-url:}")
     private String defaultCallAgentCallbackWebhookUrl;
 
+    @Value("${nexacrm.twilio.account-sid:}")
+    private String defaultTwilioAccountSid;
+
+    @Value("${nexacrm.twilio.auth-token:}")
+    private String defaultTwilioAuthToken;
+
+    @Value("${nexacrm.twilio.phone-numbers:}")
+    private String defaultTwilioPhoneNumbers;
+
+    @Value("${nexacrm.twilio.default-from-number:}")
+    private String defaultTwilioDefaultFromNumber;
+
     public void sendEmail(EmailSendRequest request) {
         validateSmtpConfiguration();
         try {
@@ -1550,7 +1562,8 @@ public class CommunicationService {
         if (!config.enabled()) {
             throw new IllegalStateException("Voice call agent is disabled.");
         }
-        String normalizedPhone = normalizePhoneForCall(recipient);
+        String targetPhone = firstNonBlank(metadataValue(metadata, "toNumber"), recipient);
+        String normalizedPhone = normalizePhoneForCall(targetPhone);
         if (normalizedPhone.isBlank()) {
             throw new IllegalStateException("Invalid phone number for voice call.");
         }
@@ -1563,12 +1576,21 @@ public class CommunicationService {
         String leadId = extractLeadId(metadata);
         String leadName = extractLeadName(metadata);
 
-        String provider = trim(config.provider()).toLowerCase(Locale.ROOT);
+        String requestedSetup = firstNonBlank(metadataValue(metadata, "setup"), metadataValue(metadata, "provider"));
+        String provider = requestedSetup.isBlank() ? trim(config.provider()).toLowerCase(Locale.ROOT) : requestedSetup.toLowerCase(Locale.ROOT);
+        String overrideFromNumber = firstNonBlank(metadataValue(metadata, "fromNumber"), metadataValue(metadata, "from"));
+
         if ("webhook".equals(provider)) {
-            queueWebhookCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName);
+            queueWebhookCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName, overrideFromNumber);
             return;
         }
-        queueBolnaCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName);
+        if ("twilio".equals(provider)) {
+            queueTwilioDirectCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName, overrideFromNumber);
+            return;
+        }
+
+        boolean forceTwilio = "bolna_twilio".equals(provider) || "twilio".equalsIgnoreCase(config.telephonyProvider());
+        queueBolnaCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName, overrideFromNumber, forceTwilio);
     }
 
     private void queueWebhookCall(
@@ -1580,6 +1602,19 @@ public class CommunicationService {
         String leadId,
         String leadName
     ) {
+        queueWebhookCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName, null);
+    }
+
+    private void queueWebhookCall(
+        VoiceAgentConfig config,
+        String normalizedPhone,
+        String callScript,
+        String triggerSource,
+        Map<String, Object> metadata,
+        String leadId,
+        String leadName,
+        String overrideFromNumber
+    ) {
         if (config.webhookUrl().isBlank()) {
             throw new IllegalStateException("Voice call webhook URL is missing.");
         }
@@ -1590,14 +1625,16 @@ public class CommunicationService {
             headers.setBearerAuth(config.apiKey());
         }
 
+        String callerNum = firstNonBlank(overrideFromNumber, config.fromNumber());
+
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("to", normalizedPhone);
         payload.put("script", callScript);
         payload.put("triggerSource", trim(triggerSource));
         payload.put("provider", "nexacrm_voice_call_agent");
         payload.put("timeoutMs", Math.max(3000, callAgentTimeoutMs));
-        if (!config.fromNumber().isBlank()) {
-            payload.put("from", config.fromNumber());
+        if (!callerNum.isBlank()) {
+            payload.put("from", callerNum);
         }
         if (!config.agentId().isBlank()) {
             payload.put("agentId", config.agentId());
@@ -1669,6 +1706,20 @@ public class CommunicationService {
         String leadId,
         String leadName
     ) {
+        queueBolnaCall(config, normalizedPhone, callScript, triggerSource, metadata, leadId, leadName, null, false);
+    }
+
+    private void queueBolnaCall(
+        VoiceAgentConfig config,
+        String normalizedPhone,
+        String callScript,
+        String triggerSource,
+        Map<String, Object> metadata,
+        String leadId,
+        String leadName,
+        String overrideFromNumber,
+        boolean forceTwilio
+    ) {
         String bolnaCallApiUrl = resolveBolnaCallApiUrl(config.bolnaApiUrl());
         String bolnaApiKey = firstNonBlank(config.bolnaApiKey(), config.apiKey());
         String bolnaAgentId = firstNonBlank(config.bolnaAgentId(), config.agentId());
@@ -1680,6 +1731,8 @@ public class CommunicationService {
             throw new IllegalStateException("Bolna agent ID is missing.");
         }
 
+        String callerNumber = firstNonBlank(overrideFromNumber, config.twilioFromNumber(), config.fromNumber());
+
         Map<String, Object> userData = new LinkedHashMap<>();
         if (!trim(leadId).isBlank()) {
             userData.put("lead_id", trim(leadId));
@@ -1689,6 +1742,10 @@ public class CommunicationService {
         }
         userData.put("trigger_source", trim(triggerSource));
         userData.put("call_script", callScript);
+        if (!callerNumber.isBlank()) {
+            userData.put("caller_phone_number", callerNumber);
+            userData.put("from_number", callerNumber);
+        }
         putIfPresent(userData, "lead_company", metadataValue(metadata, "company"));
         putIfPresent(userData, "service_interest", metadataValue(metadata, "service"));
         putIfPresent(userData, "lead_source", firstNonBlank(
@@ -1711,12 +1768,32 @@ public class CommunicationService {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("agent_id", bolnaAgentId);
         payload.put("recipient_phone_number", normalizedPhone);
-        if (!config.fromNumber().isBlank()) {
-            payload.put("from_phone_number", config.fromNumber());
+        if (!callerNumber.isBlank()) {
+            payload.put("from_phone_number", callerNumber);
         }
         if (!userData.isEmpty()) {
             payload.put("user_data", userData);
         }
+
+        boolean useTwilio = forceTwilio || !config.twilioAccountSid().isBlank();
+        if (useTwilio) {
+            payload.put("telephony_provider", "twilio");
+            if (!config.twilioAccountSid().isBlank()) {
+                payload.put("telephony_account_sid", config.twilioAccountSid());
+                payload.put("twilio_account_sid", config.twilioAccountSid());
+            }
+            if (!config.twilioAuthToken().isBlank()) {
+                payload.put("telephony_auth_token", config.twilioAuthToken());
+                payload.put("twilio_auth_token", config.twilioAuthToken());
+            }
+            Map<String, Object> telephonyConfig = new LinkedHashMap<>();
+            telephonyConfig.put("provider", "twilio");
+            if (!callerNumber.isBlank()) telephonyConfig.put("phone_number", callerNumber);
+            if (!config.twilioAccountSid().isBlank()) telephonyConfig.put("account_sid", config.twilioAccountSid());
+            if (!config.twilioAuthToken().isBlank()) telephonyConfig.put("auth_token", config.twilioAuthToken());
+            payload.put("telephony_config", telephonyConfig);
+        }
+
         String voiceId = trim(config.bolnaVoiceId());
         if (!voiceId.isBlank()) {
             payload.put("agent_data", Map.of("voice_id", voiceId));
@@ -1725,6 +1802,8 @@ public class CommunicationService {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(bolnaApiKey);
+
+        String providerName = useTwilio ? "bolna_twilio" : "bolna";
 
         try {
             ResponseEntity<String> response = restTemplate.exchange(
@@ -1741,7 +1820,7 @@ public class CommunicationService {
             }
 
             Map<String, Object> raw = new LinkedHashMap<>();
-            raw.put("provider", "bolna");
+            raw.put("provider", providerName);
             raw.put("request", payload);
             raw.put("response", readJsonObject(responseBody));
 
@@ -1753,12 +1832,12 @@ public class CommunicationService {
                 response.getStatusCode().is2xxSuccessful() ? "QUEUED" : "FAILED",
                 externalId,
                 toJsonSafe(raw),
-                "bolna",
+                providerName,
                 leadName,
                 leadId
             );
             if (!persisted) {
-                log.warn("Could not persist Bolna CALL communication for {}", normalizedPhone);
+                log.warn("Could not persist {} CALL communication for {}", providerName, normalizedPhone);
             }
 
             if (!response.getStatusCode().is2xxSuccessful()) {
@@ -1774,7 +1853,7 @@ public class CommunicationService {
                 "FAILED",
                 "",
                 apiBody,
-                "bolna",
+                providerName,
                 leadName,
                 leadId
             );
@@ -1784,8 +1863,110 @@ public class CommunicationService {
                     : "Bolna error: " + apiBody
             );
         } catch (Exception ex) {
-            throw new IllegalStateException("Failed to queue Bolna call.");
+            throw new IllegalStateException("Failed to queue Bolna call: " + ex.getMessage());
         }
+    }
+
+    private void queueTwilioDirectCall(
+        VoiceAgentConfig config,
+        String normalizedPhone,
+        String callScript,
+        String triggerSource,
+        Map<String, Object> metadata,
+        String leadId,
+        String leadName,
+        String overrideFromNumber
+    ) {
+        String accountSid = config.twilioAccountSid();
+        String authToken = config.twilioAuthToken();
+        String fromNumber = firstNonBlank(overrideFromNumber, config.twilioFromNumber(), config.fromNumber());
+
+        if (accountSid.isBlank() || authToken.isBlank()) {
+            throw new IllegalStateException("Twilio Account SID and Auth Token are required for direct Twilio calls.");
+        }
+        if (fromNumber.isBlank()) {
+            throw new IllegalStateException("Twilio caller phone number (From) is required.");
+        }
+
+        String twilioUrl = "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + "/Calls.json";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(accountSid, authToken);
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        String twiml = "<Response><Say voice=\"alice\">" + escapeXml(callScript) + "</Say></Response>";
+
+        org.springframework.util.MultiValueMap<String, String> form = new org.springframework.util.LinkedMultiValueMap<>();
+        form.add("To", normalizedPhone);
+        form.add("From", fromNumber);
+        form.add("Twiml", twiml);
+        String callbackWebhookUrl = resolveCallAgentWebhookUrl(config);
+        if (!callbackWebhookUrl.isBlank()) {
+            form.add("StatusCallback", callbackWebhookUrl);
+            form.add("StatusCallbackMethod", "POST");
+        }
+
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                twilioUrl,
+                HttpMethod.POST,
+                new HttpEntity<>(form, headers),
+                Map.class
+            );
+
+            Map<?, ?> body = response.getBody() == null ? Map.of() : response.getBody();
+            String externalId = trim(String.valueOf(body.get("sid")));
+            String status = trim(String.valueOf(body.get("status"))).toUpperCase(Locale.ROOT);
+            if (status.isBlank()) status = "QUEUED";
+
+            Map<String, Object> raw = new LinkedHashMap<>();
+            raw.put("provider", "twilio");
+            raw.put("from", fromNumber);
+            raw.put("to", normalizedPhone);
+            raw.put("response", body);
+
+            boolean persisted = tryPersistCommunication(
+                "CALL",
+                "OUT",
+                normalizedPhone,
+                callScript,
+                status,
+                externalId,
+                toJsonSafe(raw),
+                "twilio",
+                leadName,
+                leadId
+            );
+            if (!persisted) {
+                log.warn("Could not persist Twilio CALL communication for {}", normalizedPhone);
+            }
+        } catch (HttpStatusCodeException ex) {
+            String apiBody = trim(ex.getResponseBodyAsString());
+            tryPersistCommunication(
+                "CALL",
+                "OUT",
+                normalizedPhone,
+                callScript,
+                "FAILED",
+                "",
+                apiBody,
+                "twilio",
+                leadName,
+                leadId
+            );
+            throw new IllegalStateException(apiBody.isBlank() ? "Failed to place Twilio call." : "Twilio error: " + apiBody);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to place Twilio call: " + ex.getMessage());
+        }
+    }
+
+    private String escapeXml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                   .replace("<", "&lt;")
+                   .replace(">", "&gt;")
+                   .replace("\"", "&quot;")
+                   .replace("'", "&apos;");
     }
 
     private Map<String, Object> readJsonMap(String value) {
@@ -2096,8 +2277,16 @@ public class CommunicationService {
         }
     }
 
-    private VoiceAgentConfig resolveVoiceAgentConfig() {
+    public VoiceAgentConfig resolveVoiceAgentConfig() {
         Map<String, String> config = integrationService.getConfig("voice_call_agent");
+        Map<String, String> twilioConfig = integrationService.getConfig("twilio");
+
+        String twilioAccountSid = firstNonBlank(config.get("twilioAccountSid"), config.get("accountSid"), twilioConfig.get("accountSid"), defaultTwilioAccountSid);
+        String twilioAuthToken = firstNonBlank(config.get("twilioAuthToken"), config.get("authToken"), twilioConfig.get("authToken"), defaultTwilioAuthToken);
+        String twilioFromNumber = firstNonBlank(config.get("twilioFromNumber"), twilioConfig.get("defaultFromNumber"), twilioConfig.get("fromNumber"), defaultTwilioDefaultFromNumber);
+        String twilioPhoneNumbers = firstNonBlank(config.get("twilioPhoneNumbers"), twilioConfig.get("phoneNumbers"), defaultTwilioPhoneNumbers);
+        String telephonyProvider = firstNonBlank(config.get("telephonyProvider"), "twilio");
+
         String provider = firstNonBlank(config.get("provider"), defaultCallAgentProvider, "bolna").toLowerCase(Locale.ROOT);
         boolean enabled = parseBooleanFlag(firstNonBlank(config.get("enabled"), String.valueOf(defaultCallAgentEnabled)));
         boolean autoCallOnLeadCreate = parseBooleanFlag(
@@ -2106,7 +2295,10 @@ public class CommunicationService {
         String webhookUrl = firstNonBlank(config.get("webhookUrl"), defaultCallAgentWebhookUrl);
         String apiKey = firstNonBlank(config.get("apiKey"), defaultCallAgentApiKey);
         String agentId = firstNonBlank(config.get("agentId"), defaultCallAgentAgentId);
-        String fromNumber = firstNonBlank(config.get("fromNumber"), defaultCallAgentFromNumber);
+        String fromNumber = firstNonBlank(config.get("fromNumber"), twilioFromNumber, defaultCallAgentFromNumber);
+        if (twilioFromNumber.isBlank()) {
+            twilioFromNumber = fromNumber;
+        }
         String webhookSecret = trim(config.get("webhookSecret"));
         String callbackWebhookUrl = firstNonBlank(config.get("callbackWebhookUrl"), defaultCallAgentCallbackWebhookUrl);
         String bolnaApiUrl = firstNonBlank(config.get("bolnaApiUrl"), defaultBolnaApiUrl);
@@ -2126,8 +2318,80 @@ public class CommunicationService {
             bolnaApiUrl,
             bolnaApiKey,
             bolnaAgentId,
-            bolnaVoiceId
+            bolnaVoiceId,
+            twilioAccountSid,
+            twilioAuthToken,
+            twilioFromNumber,
+            twilioPhoneNumbers,
+            telephonyProvider
         );
+    }
+
+    public Map<String, Object> getCallOptions() {
+        VoiceAgentConfig config = resolveVoiceAgentConfig();
+        Set<String> numbers = new LinkedHashSet<>();
+
+        if (!config.twilioPhoneNumbers().isBlank()) {
+            for (String s : config.twilioPhoneNumbers().split("[,;\\s]+")) {
+                String clean = trim(s);
+                if (!clean.isBlank()) numbers.add(clean);
+            }
+        }
+        if (!config.twilioFromNumber().isBlank()) {
+            numbers.add(trim(config.twilioFromNumber()));
+        }
+        if (!config.fromNumber().isBlank()) {
+            numbers.add(trim(config.fromNumber()));
+        }
+
+        List<Map<String, Object>> setups = new ArrayList<>();
+        setups.add(Map.of(
+            "id", "bolna_twilio",
+            "name", "Bolna AI + Twilio",
+            "badge", "Recommended",
+            "description", "Conversational AI voice agent (Bolna) connected with Twilio telephony line"
+        ));
+        setups.add(Map.of(
+            "id", "bolna",
+            "name", "Bolna AI (Default)",
+            "badge", "Standard",
+            "description", "Conversational AI voice agent using Bolna built-in telephony"
+        ));
+        setups.add(Map.of(
+            "id", "twilio",
+            "name", "Twilio Direct Voice",
+            "badge", "Direct",
+            "description", "Direct automated voice call through Twilio line"
+        ));
+        setups.add(Map.of(
+            "id", "webhook",
+            "name", "Custom Webhook",
+            "badge", "Webhook",
+            "description", "Dispatch outbound call event to external webhook"
+        ));
+
+        String active = trim(config.provider()).toLowerCase(Locale.ROOT);
+        if (active.isBlank() || "bolna".equals(active)) {
+            if (!config.twilioAccountSid().isBlank()) {
+                active = "bolna_twilio";
+            } else {
+                active = "bolna";
+            }
+        }
+
+        String defaultNumber = !config.twilioFromNumber().isBlank()
+            ? config.twilioFromNumber()
+            : (!config.fromNumber().isBlank() ? config.fromNumber() : (numbers.isEmpty() ? "" : numbers.iterator().next()));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("activeSetup", active);
+        result.put("availableSetups", setups);
+        result.put("phoneNumbers", new ArrayList<>(numbers));
+        result.put("defaultPhoneNumber", defaultNumber);
+        result.put("twilioConfigured", !config.twilioAccountSid().isBlank());
+        result.put("bolnaConfigured", !config.bolnaApiKey().isBlank());
+        result.put("enabled", config.enabled());
+        return result;
     }
 
     private String buildLeadCallScript(String leadName, String company, String service) {
@@ -2817,7 +3081,7 @@ public class CommunicationService {
         }
     }
 
-    private record VoiceAgentConfig(
+    public record VoiceAgentConfig(
         boolean enabled,
         boolean autoCallOnLeadCreate,
         String provider,
@@ -2830,6 +3094,11 @@ public class CommunicationService {
         String bolnaApiUrl,
         String bolnaApiKey,
         String bolnaAgentId,
-        String bolnaVoiceId
+        String bolnaVoiceId,
+        String twilioAccountSid,
+        String twilioAuthToken,
+        String twilioFromNumber,
+        String twilioPhoneNumbers,
+        String telephonyProvider
     ) { }
 }
