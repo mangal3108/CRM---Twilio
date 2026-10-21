@@ -20,6 +20,7 @@ import { Timeline, TimelineItem } from '../ui/Timeline'
 import { LinearProgress } from '../ui/Progress'
 import ScreenModalPortal from '../ui/ScreenModalPortal'
 import CopyableContact from '../ui/CopyableContact'
+import PhoneInputWithCountry from '../ui/PhoneInputWithCountry'
 import DateRangeFilter from '../ui/DateRangeFilter'
 import { anyFieldMatchesSearch } from '../../utils/search'
 import { emptyDateRange, isWithinDateRange } from '../../utils/dateRangeFilter'
@@ -163,9 +164,13 @@ function AddCustomerModal({ onClose, onSave }) {
               {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Phone *</label>
-              <input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+91-98765-43210"
-                className={`input mt-1 w-full ${errors.phone ? 'ring-2 ring-red-400' : ''}`} />
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block mb-1">Phone (with Country Code) *</label>
+              <PhoneInputWithCountry
+                value={form.phone}
+                onChange={(val) => set('phone', val)}
+                placeholder="98765 43210"
+                required
+              />
               {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
             </div>
           </div>

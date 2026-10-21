@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { callsAPI, leadsAPI } from '../../services/api'
+import PhoneInputWithCountry from '../ui/PhoneInputWithCountry'
 
 const SETUP_CARDS = [
   {
@@ -282,16 +283,14 @@ export default function CallLeadModal({ lead, onClose, onCallSuccess }) {
             </div>
 
             {isCustomFrom && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
-                <input
-                  type="text"
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-1">
+                <PhoneInputWithCountry
                   value={customFromNumber}
-                  onChange={(e) => setCustomFromNumber(e.target.value)}
-                  placeholder="e.g. +12055551234 or +919876543210"
-                  className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-brand-500/30"
+                  onChange={setCustomFromNumber}
+                  placeholder="Caller ID (e.g. 98765 43210)"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Provide international format starting with + (e.g. +1... or +91...)
+                <p className="text-[10px] text-slate-500">
+                  Select your country code and enter the verified Twilio caller ID.
                 </p>
               </motion.div>
             )}
@@ -302,19 +301,14 @@ export default function CallLeadModal({ lead, onClose, onCallSuccess }) {
             <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-1.5">
               3. Lead Phone Number to Call (To)
             </label>
-            <div className="relative">
-              <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={toNumber}
-                onChange={(e) => setToNumber(e.target.value)}
-                placeholder="+91..."
-                required
-                className="w-full text-xs font-semibold pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-brand-500/30"
-              />
-            </div>
+            <PhoneInputWithCountry
+              value={toNumber}
+              onChange={setToNumber}
+              placeholder="Recipient phone number"
+              required
+            />
             <p className="text-[10px] text-slate-500 mt-1">
-              Confirm or edit the phone number that will receive the outbound call.
+              Select country code and verify or edit recipient number before placing outbound call.
             </p>
           </div>
 

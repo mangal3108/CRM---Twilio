@@ -28,6 +28,7 @@ import autoTable from 'jspdf-autotable'
 import ScreenModalPortal from '../ui/ScreenModalPortal'
 import CallLeadModal from './CallLeadModal'
 import CopyableContact from '../ui/CopyableContact'
+import PhoneInputWithCountry from '../ui/PhoneInputWithCountry'
 import DateRangeFilter from '../ui/DateRangeFilter'
 import { emptyDateRange, hasDateRangeFilter, isWithinDateRange } from '../../utils/dateRangeFilter'
 
@@ -169,8 +170,12 @@ function AddLeadModal({ onClose, onAdd, teamMembers }) {
               <input name="email" type="email" value={form.email} onChange={handleChange} required className="input" placeholder="ramesh@techcorp.in" />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">Phone</label>
-              <input name="phone" value={form.phone} onChange={handleChange} className="input" placeholder="+91-98765-43210" />
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">Phone (with Country Code)</label>
+              <PhoneInputWithCountry
+                value={form.phone}
+                onChange={(val) => setForm(prev => ({ ...prev, phone: val }))}
+                placeholder="98765 43210"
+              />
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">Service</label>
@@ -324,8 +329,12 @@ function EditLeadModal({ lead, onClose, onSave, teamMembers }) {
               <input name="email" type="email" value={form.email} onChange={handleChange} required className="input" />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">Phone</label>
-              <input name="phone" value={form.phone || ''} onChange={handleChange} className="input" />
+              <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">Phone (with Country Code)</label>
+              <PhoneInputWithCountry
+                value={form.phone || ''}
+                onChange={(val) => setForm(prev => ({ ...prev, phone: val }))}
+                placeholder="98765 43210"
+              />
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 block mb-1">Service</label>
