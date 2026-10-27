@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Menu, Sun, Moon, LogOut, User, ChevronDown, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Menu, Sun, Moon, LogOut, User, ChevronDown, RefreshCw, AlertTriangle, PhoneCall } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../../store/authStore'
@@ -14,6 +14,7 @@ import { getLeadAgeMinutes } from '../../utils/leadSla'
 import { connectWebSocket, disconnectWebSocket } from '../../services/websocket'
 import { authAPI, leadsAPI } from '../../services/api'
 import BrandLogo from '../brand/BrandLogo'
+import DirectDialerModal from '../dialer/DirectDialerModal'
 
 const AVATAR_STYLE_CLASS = {
   brand: 'from-brand-500 to-accent-500',
@@ -57,6 +58,9 @@ export default function Topbar({ onMenuClick, onRefresh }) {
   const [showNotifications, setShowNotifications] = useState(false)
   const [showDelayAlerts, setShowDelayAlerts] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showDialer, setShowDialer] = useState(false)
+  const [dialerNumber, setDialerNumber] = useState('')
+  const [dialerLead, setDialerLead] = useState(null)
   const [avatarBroken, setAvatarBroken] = useState(false)
   const [timeTick, setTimeTick] = useState(Date.now())
   const notifRef = useRef(null)
@@ -92,6 +96,11 @@ export default function Topbar({ onMenuClick, onRefresh }) {
   }, [])
 
   useEffect(() => {
+    window.addEventListener('open-dialer', (e) => {
+      if (e.detail?.number) setDialerNumber(e.detail.number)
+      if (e.detail?.lead) setDialerLead(e.detail.lead)
+      setShowDialer(true)
+    })
     const id = window.setInterval(() => setTimeTick(Date.now()), 60 * 1000)
     return () => window.clearInterval(id)
   }, [])
@@ -249,6 +258,17 @@ export default function Topbar({ onMenuClick, onRefresh }) {
           <RefreshCw className="w-5 h-5" />
         </button>
 
+        {/* Direct Phone Dialer */}
+        <button
+          onClick={() => { setDialerNumber(''); setDialerLead(null); setShowDialer(true); }}
+          className="p-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 transition-colors flex items-center gap-1.5"
+          title="Direct Phone Dialer (Call Anyone)"
+          aria-label="Direct Phone Dialer"
+        >
+          <PhoneCall className="w-5 h-5" />
+          <span className="hidden md:inline text-xs font-semibold">Dialer</span>
+        </button>
+
         <div className="relative" ref={delayRef}>
           <button
             onClick={() => { setShowDelayAlerts((v) => !v); setShowNotifications(false); setShowUserMenu(false) }}
@@ -365,6 +385,13 @@ export default function Topbar({ onMenuClick, onRefresh }) {
           </AnimatePresence>
         </div>
       </div>
+
+      <DirectDialerModal
+        isOpen={showDialer}
+        onClose={() => setShowDialer(false)}
+        initialNumber={dialerNumber}
+        initialLead={dialerLead}
+      />
     </header>
   )
 }

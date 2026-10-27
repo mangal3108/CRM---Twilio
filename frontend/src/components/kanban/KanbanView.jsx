@@ -28,6 +28,7 @@ import PageHeading from '../ui/PageHeading'
 import { PERMISSIONS, hasPermission } from '../../utils/permissions'
 import LeadActivitiesModal from '../LeadActivitiesModal'
 import PaginatedSelect from '../ui/PaginatedSelect'
+import SendWhatsAppModal from '../leads/SendWhatsAppModal'
 import ScreenModalPortal from '../ui/ScreenModalPortal'
 import CallLeadModal from '../leads/CallLeadModal'
 import CopyableContact from '../ui/CopyableContact'
@@ -1020,6 +1021,7 @@ export default function KanbanPage() {
   const [teamMembers, setTeamMembers] = useState([])
   const [callingLeadId, setCallingLeadId] = useState(null)
   const [callingLeadModal, setCallingLeadModal] = useState(null)
+  const [whatsAppModalLead, setWhatsAppModalLead] = useState(null)
   const [activitiesLead, setActivitiesLead] = useState(null)
   const [activityStateByLeadId, setActivityStateByLeadId] = useState({})
   const [activityTabByLeadId, setActivityTabByLeadId] = useState({})
@@ -1492,8 +1494,7 @@ export default function KanbanPage() {
 
   const handleWhatsApp = (lead) => {
     if (!lead?.phone) { toast.error('No phone number'); return }
-    const phone = lead.phone.replace(/[^0-9+]/g, '')
-    window.open(`https://wa.me/${phone.replace('+', '')}`, '_blank')
+    setWhatsAppModalLead(lead)
   }
 
   /* ── Activity workflow ───────────────────────────────────── */
@@ -1793,6 +1794,17 @@ export default function KanbanPage() {
             initialActiveTab={activityTabByLeadId[activitiesLead.id] ?? Math.max(0, getLeadCurrentStage(getActivityState(activitiesLead.id)))}
             onActiveTabChange={handleActivityTabChange}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {whatsAppModalLead && (
+          <ScreenModalPortal>
+            <SendWhatsAppModal
+              lead={whatsAppModalLead}
+              onClose={() => setWhatsAppModalLead(null)}
+            />
+          </ScreenModalPortal>
         )}
       </AnimatePresence>
 

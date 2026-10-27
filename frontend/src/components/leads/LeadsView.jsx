@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import LeadActivitiesModal from '../../components/LeadActivitiesModal'
+import SendWhatsAppModal from './SendWhatsAppModal'
 import { sendWhatsApp } from '../../utils/whatsapp'
 import {
   KRISCEL_WHATSAPP_FOLLOW_UP_MESSAGE,
@@ -2063,7 +2064,7 @@ export default function LeadsPage() {
       <AnimatePresence>
         {waLead && (
           <ScreenModalPortal>
-            <WhatsAppModal lead={waLead} onClose={() => setWaLead(null)} />
+            <SendWhatsAppModal lead={waLead} onClose={() => setWaLead(null)} />
           </ScreenModalPortal>
         )}
       </AnimatePresence>

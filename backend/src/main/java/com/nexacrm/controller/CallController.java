@@ -35,6 +35,13 @@ public class CallController {
         return ResponseEntity.ok(callAgentService.getCallOptions());
     }
 
+    @GetMapping("/recent")
+    @PreAuthorize("hasAuthority('leads.read') or hasAuthority('communications.read') or hasAuthority('communications.send')")
+    @Operation(summary = "Get recent call records across all leads and dialer calls")
+    public ResponseEntity<List<Map<String, Object>>> getRecentCalls() {
+        return ResponseEntity.ok(callAgentService.getRecentCalls());
+    }
+
     @PostMapping("/trigger/{leadId}")
     @PreAuthorize("hasAuthority('communications.send')")
     @Operation(summary = "Trigger outbound AI call for a lead")
@@ -87,5 +94,31 @@ public class CallController {
         String setup = body != null ? (body.get("setup") != null ? body.get("setup") : body.get("provider")) : null;
         String fromNumber = body != null ? body.get("fromNumber") : null;
         return ResponseEntity.ok(callAgentService.retryCall(callId, setup, fromNumber));
+    }
+
+    @PostMapping("/direct")
+    @PreAuthorize("hasAuthority('communications.send')")
+    @Operation(summary = "Initiate direct 2-way call via Twilio line")
+    public ResponseEntity<Map<String, Object>> makeDirectCall(@RequestBody Map<String, String> body) {
+        String toNumber = body != null ? body.get("toNumber") : null;
+        String fromNumber = body != null ? body.get("fromNumber") : null;
+        String agentNumber = body != null ? body.get("agentNumber") : null;
+        String leadId = body != null ? body.get("leadId") : null;
+        String leadName = body != null ? body.get("leadName") : null;
+        return ResponseEntity.ok(callAgentService.makeDirectCall(toNumber, fromNumber, agentNumber, leadId, leadName));
+    }
+
+    @PostMapping("/hangup/{callSid}")
+    @PreAuthorize("hasAuthority('communications.send')")
+    @Operation(summary = "Terminate an active Twilio call")
+    public ResponseEntity<Map<String, Object>> hangupCall(@PathVariable String callSid) {
+        return ResponseEntity.ok(callAgentService.hangupCall(callSid));
+    }
+
+    @GetMapping("/status/{callSid}")
+    @PreAuthorize("hasAuthority('communications.send') or hasAuthority('leads.read')")
+    @Operation(summary = "Get live Twilio call status")
+    public ResponseEntity<Map<String, Object>> getCallStatus(@PathVariable String callSid) {
+        return ResponseEntity.ok(callAgentService.getCallStatus(callSid));
     }
 }

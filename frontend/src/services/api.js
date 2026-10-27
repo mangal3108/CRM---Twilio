@@ -241,6 +241,10 @@ export const callsAPI = {
   getIntelligence: (leadId) => api.get(`/calls/${leadId}/intelligence`),
   retry: (callId, d) => api.post(`/calls/retry/${callId}`, d ?? {}),
   getOptions: () => api.get('/calls/options'),
+  getRecent: () => api.get('/calls/recent'),
+  directCall: (d) => api.post('/calls/direct', d ?? {}),
+  hangup: (callSid) => api.post(`/calls/hangup/${callSid}`),
+  getStatus: (callSid) => api.get(`/calls/status/${callSid}`),
 }
 
 // ──────────────────────────────────────────
@@ -284,6 +288,22 @@ export const commsAPI = {
   getFacebookMessages:       (psid) => api.get('/communications/facebook/messages', { params: { psid } }),
   getInstagramConversations: () => api.get('/communications/instagram/conversations'),
   getInstagramMessages:      (igsid) => api.get('/communications/instagram/messages', { params: { igsid } }),
+  // OpenWA Gateway integration
+  openwaStatus:       () => api.get('/communications/whatsapp/openwa/status'),
+  openwaStartSession: (data) => api.post('/communications/whatsapp/openwa/session/start', data),
+  openwaGetQR:        (sessionId) => api.get('/communications/whatsapp/openwa/qr', { params: { sessionId } }),
+  openwaLogoutSession:(data) => api.post('/communications/whatsapp/openwa/session/logout', data),
+  openwaSendMessage:  (data) => api.post('/communications/whatsapp/openwa/send', data),
+}
+
+export const openwaAPI = {
+  getStatus:       () => api.get('/communications/whatsapp/openwa/status'),
+  startSession:    (name) => api.post('/communications/whatsapp/openwa/session/start', { name }),
+  getQR:           (sessionId) => api.get('/communications/whatsapp/openwa/qr', { params: { sessionId } }),
+  logoutSession:   (sessionId) => api.post('/communications/whatsapp/openwa/session/logout', { sessionId }),
+  sendMessage:     (recipient, message) => api.post('/communications/whatsapp/openwa/send', { recipient, message }),
+  getConversations:() => api.get('/communications/whatsapp/conversations'),
+  getMessages:     (contact) => api.get('/communications/whatsapp/messages', { params: { contact } }),
 }
 
 // ──────────────────────────────────────────

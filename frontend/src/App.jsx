@@ -18,6 +18,8 @@ const pageImports = {
   '/pipeline': () => import('./pages/KanbanPage'),
   '/task-followup': () => import('./pages/TaskPage'),
   '/customers': () => import('./pages/CustomersPage'),
+  '/dialer': () => import('./pages/DialerPage'),
+  '/whatsapp': () => import('./pages/WhatsAppPage'),
   '/communication': () => import('./pages/CommunicationPage'),
   '/ai-engine': () => import('./pages/AIEnginePage'),
   '/automation': () => import('./pages/AutomationPage'),
@@ -45,6 +47,8 @@ const LeadsPage = lazy(pageImports['/leads'])
 const KanbanPage = lazy(pageImports['/pipeline'])
 const TaskFollowUpPage = lazy(pageImports['/task-followup'])
 const CustomersPage = lazy(pageImports['/customers'])
+const DialerPage = lazy(pageImports['/dialer'])
+const WhatsAppPage = lazy(pageImports['/whatsapp'])
 const CommunicationPage = lazy(pageImports['/communication'])
 const AIEnginePage = lazy(pageImports['/ai-engine'])
 const AutomationPage = lazy(pageImports['/automation'])
@@ -365,6 +369,8 @@ export default function App() {
             <Route path="/leads" element={<PermissionRoute permission={PERMISSIONS.LEADS_READ}><LeadsPage /></PermissionRoute>} />
             <Route path="/pipeline" element={<PermissionRoute permission={PERMISSIONS.LEADS_READ}><KanbanPage /></PermissionRoute>} />
             <Route path="/customers" element={<PermissionRoute permission={PERMISSIONS.CUSTOMERS_READ}><CustomersPage /></PermissionRoute>} />
+            <Route path="/dialer" element={<PermissionRoute permission={PERMISSIONS.COMMUNICATIONS_READ}><DialerPage /></PermissionRoute>} />
+            <Route path="/whatsapp" element={<PermissionRoute permission={PERMISSIONS.COMMUNICATIONS_READ}><WhatsAppPage /></PermissionRoute>} />
             <Route path="/communication" element={<PermissionRoute permission={PERMISSIONS.COMMUNICATIONS_READ}><CommunicationPage /></PermissionRoute>} />
             <Route path="/ai-engine" element={<PermissionRoute permission={PERMISSIONS.AI_USE}><AIEnginePage /></PermissionRoute>} />
             <Route path="/automation" element={<PermissionRoute permission={PERMISSIONS.AUTOMATION_READ}><AutomationPage /></PermissionRoute>} />

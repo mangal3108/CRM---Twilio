@@ -262,6 +262,10 @@ public class WebhookController {
     // ── WhatsApp helpers ──────────────────────────────────────────
 
     private boolean isValidWhatsAppJsonWebhook(String body, String signatureHeader, String... tokenCandidates) {
+        if (!isConfiguredSecret(whatsappWebhookToken)) {
+            // If no secret configured, accept webhook from local/OpenWA
+            return true;
+        }
         return isValidFacebookSignature(body, signatureHeader) || isValidWebhookToken(tokenCandidates);
     }
 

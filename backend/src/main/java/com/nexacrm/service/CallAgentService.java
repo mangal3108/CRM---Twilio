@@ -140,6 +140,8 @@ public class CallAgentService {
         Map<String, Object> metadata = readMetadata(payload);
 
         String externalId = firstNonBlank(
+            stringValue(payload.get("CallSid")),
+            stringValue(payload.get("callSid")),
             stringValue(payload.get("externalId")),
             stringValue(payload.get("external_id")),
             stringValue(payload.get("callId")),
@@ -158,8 +160,9 @@ public class CallAgentService {
             stringValue(metadata.get("lead_id"))
         );
         String status = normalizeStatus(firstNonBlank(
-            stringValue(payload.get("status")),
+            stringValue(payload.get("CallStatus")),
             stringValue(payload.get("callStatus")),
+            stringValue(payload.get("status")),
             stringValue(payload.get("call_status")),
             stringValue(payload.get("event")),
             stringValue(payload.get("state"))
@@ -333,6 +336,19 @@ public class CallAgentService {
     }
 
     @Transactional(readOnly = true)
+    public List<Map<String, Object>> getRecentCalls() {
+        return communicationRecordRepository
+            .findByTenantIdAndChannelIgnoreCaseOrderByCreatedAtDesc(
+                tenantId(),
+                "CALL",
+                org.springframework.data.domain.PageRequest.of(0, 30)
+            )
+            .stream()
+            .map(this::toCallHistoryRow)
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
     public Map<String, Object> getLeadCallIntelligence(String leadId) {
         Lead lead = ensureLeadExists(leadId);
         List<CommunicationRecord> calls = communicationRecordRepository
@@ -443,6 +459,257 @@ public class CallAgentService {
             "setup", setup != null ? setup : "",
             "fromNumber", fromNumber != null ? fromNumber : ""
         );
+    }
+
+    public Map<String, Object> makeDirectCall(
+        String toNumber,
+        String fromNumber,
+        String agentNumber,
+        String leadId,
+        String leadName
+    ) {
+        CommunicationService.VoiceAgentConfig config = communicationService.resolveVoiceAgentConfig();
+        String accountSid = trim(config.twilioAccountSid());
+        String authToken = trim(config.twilioAuthToken());
+        String callerId = firstNonBlank(fromNumber, config.twilioFromNumber(), config.fromNumber());
+
+        if (accountSid.isBlank() || authToken.isBlank()) {
+            throw new IllegalStateException("Twilio integration is not configured. Please add your Twilio Account SID and Auth Token in Integrations.");
+        }
+        if (callerId.isBlank()) {
+            throw new IllegalStateException("Twilio caller phone number (From) is required. Please select or configure a Twilio number.");
+        }
+
+        String normalizedTo = communicationService.normalizePhoneForCall(toNumber);
+        if (normalizedTo.isBlank()) {
+            throw new IllegalStateException("Recipient phone number (To) is required.");
+        }
+
+        String normalizedAgent = trim(agentNumber).isBlank() ? "" : communicationService.normalizePhoneForCall(agentNumber);
+
+        String twilioUrl = "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + "/Calls.json";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(accountSid, authToken);
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        org.springframework.util.MultiValueMap<String, String> form = new org.springframework.util.LinkedMultiValueMap<>();
+
+        String twiml;
+        if (!normalizedAgent.isBlank()) {
+            form.add("To", normalizedAgent);
+            form.add("From", callerId);
+            twiml = "<Response>"
+                + "<Say voice=\"alice\">Connecting your call to " + communicationService.escapeXml(normalizedTo) + " from your Twilio line.</Say>"
+                + "<Dial callerId=\"" + communicationService.escapeXml(callerId) + "\" record=\"record-from-answer\" timeout=\"45\">"
+                + "<Number>" + communicationService.escapeXml(normalizedTo) + "</Number>"
+                + "</Dial>"
+                + "</Response>";
+        } else {
+            form.add("To", normalizedTo);
+            form.add("From", callerId);
+            twiml = "<Response>"
+                + "<Say voice=\"alice\">Hello, this is a call from NexaCRM. Please wait while an agent connects.</Say>"
+                + "</Response>";
+        }
+
+        form.add("Twiml", twiml);
+        String callbackWebhookUrl = communicationService.resolveCallAgentWebhookUrl(config);
+        if (!callbackWebhookUrl.isBlank()) {
+            form.add("StatusCallback", callbackWebhookUrl);
+            form.add("StatusCallbackMethod", "POST");
+        }
+
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                twilioUrl,
+                HttpMethod.POST,
+                new HttpEntity<>(form, headers),
+                Map.class
+            );
+
+            Map<?, ?> body = response.getBody() == null ? Map.of() : response.getBody();
+            String externalId = trim(String.valueOf(body.get("sid")));
+            String status = normalizeStatus(String.valueOf(body.get("status")));
+            if (status.isBlank()) status = "INITIATED";
+
+            Map<String, Object> raw = new LinkedHashMap<>();
+            raw.put("provider", "twilio_direct");
+            raw.put("from", callerId);
+            raw.put("to", normalizedTo);
+            raw.put("agentPhone", normalizedAgent);
+            raw.put("response", body);
+
+            String callBodyDesc = "Direct 2-way call to " + normalizedTo + " from Twilio number " + callerId;
+            if (!normalizedAgent.isBlank()) {
+                callBodyDesc += " (Bridged with agent phone " + normalizedAgent + ")";
+            }
+
+            String effectiveLeadName = trim(leadName);
+            String effectiveLeadId = trim(leadId);
+
+            if (!effectiveLeadId.isBlank() && effectiveLeadName.isBlank()) {
+                leadRepository.findByIdAndTenantIdAndDeletedFalse(effectiveLeadId, tenantId())
+                    .ifPresent(l -> {
+                        if (l.getName() != null) {
+                            effectiveLeadName.concat(l.getName());
+                        }
+                    });
+            }
+
+            communicationService.tryPersistCommunication(
+                "CALL",
+                "OUT",
+                normalizedTo,
+                callBodyDesc,
+                status,
+                externalId,
+                toJson(raw),
+                "twilio_direct",
+                effectiveLeadName,
+                effectiveLeadId
+            );
+
+            if (!effectiveLeadId.isBlank()) {
+                Lead lead = leadRepository.findByIdAndTenantIdAndDeletedFalse(effectiveLeadId, tenantId()).orElse(null);
+                if (lead != null) {
+                    lead.setLastContactedAt(LocalDateTime.now());
+                    if (lead.getStatus() == Lead.LeadStatus.NEW) {
+                        lead.setStatus(Lead.LeadStatus.CONTACTED);
+                    }
+                    leadChangeAuditService.save(lead);
+
+                    var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                    String actor = (auth != null && auth.getPrincipal() instanceof User u && u.getEmail() != null)
+                        ? u.getEmail() : "agent";
+
+                    LeadActivity activity = LeadActivity.builder()
+                        .leadId(lead.getId())
+                        .activityIndex(0)
+                        .activityId("act_call")
+                        .activityLabel("Direct Call")
+                        .activityTitle("Direct Twilio Call")
+                        .assignedTo(actor)
+                        .summary("Direct call to " + normalizedTo + " from " + callerId + (!normalizedAgent.isBlank() ? " (Bridged with " + normalizedAgent + ")" : ""))
+                        .values(Map.of("channel", "twilio_direct", "status", status, "phone", normalizedTo))
+                        .savedAt(LocalDateTime.now())
+                        .build();
+                    activity.setTenantId(tenantId());
+                    leadActivityRepository.save(activity);
+                }
+            }
+
+            notificationPublisher.broadcast(
+                Map.of(
+                    "type", "CALL",
+                    "callSid", externalId,
+                    "status", status,
+                    "toNumber", normalizedTo,
+                    "fromNumber", callerId,
+                    "agentNumber", normalizedAgent,
+                    "leadId", effectiveLeadId
+                )
+            );
+
+            return Map.of(
+                "ok", true,
+                "callSid", externalId,
+                "status", status,
+                "toNumber", normalizedTo,
+                "fromNumber", callerId,
+                "agentNumber", normalizedAgent,
+                "message", !normalizedAgent.isBlank()
+                    ? "Twilio is ringing your phone (" + normalizedAgent + ") first! Pick up to connect directly with " + normalizedTo + "."
+                    : "Direct Twilio call placed to " + normalizedTo + " from " + callerId
+            );
+        } catch (HttpStatusCodeException ex) {
+            String apiBody = trim(ex.getResponseBodyAsString());
+            log.error("Twilio API direct call error: {}", apiBody);
+            throw new IllegalStateException("Twilio error (" + ex.getStatusCode().value() + "): " + (apiBody.isBlank() ? ex.getMessage() : apiBody));
+        } catch (Exception ex) {
+            log.error("Failed to initiate direct Twilio call", ex);
+            throw new IllegalStateException("Failed to place direct call: " + ex.getMessage());
+        }
+    }
+
+    public Map<String, Object> hangupCall(String callSid) {
+        if (callSid == null || callSid.isBlank()) {
+            throw new IllegalArgumentException("Call SID is required.");
+        }
+        CommunicationService.VoiceAgentConfig config = communicationService.resolveVoiceAgentConfig();
+        String accountSid = trim(config.twilioAccountSid());
+        String authToken = trim(config.twilioAuthToken());
+
+        if (accountSid.isBlank() || authToken.isBlank()) {
+            throw new IllegalStateException("Twilio integration is not configured.");
+        }
+
+        String twilioUrl = "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + "/Calls/" + callSid.trim() + ".json";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(accountSid, authToken);
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        org.springframework.util.MultiValueMap<String, String> form = new org.springframework.util.LinkedMultiValueMap<>();
+        form.add("Status", "completed");
+
+        try {
+            restTemplate.exchange(twilioUrl, HttpMethod.POST, new HttpEntity<>(form, headers), Map.class);
+        } catch (Exception ex) {
+            log.warn("Twilio hangup returned: {}", ex.getMessage());
+        }
+
+        communicationRecordRepository
+            .findFirstByChannelIgnoreCaseAndExternalIdOrderByCreatedAtDesc("CALL", callSid.trim())
+            .ifPresent(record -> {
+                record.setStatus("COMPLETED");
+                communicationRecordRepository.save(record);
+            });
+
+        return Map.of("ok", true, "callSid", callSid.trim(), "message", "Call terminated successfully");
+    }
+
+    public Map<String, Object> getCallStatus(String callSid) {
+        if (callSid == null || callSid.isBlank()) {
+            throw new IllegalArgumentException("Call SID is required.");
+        }
+        CommunicationService.VoiceAgentConfig config = communicationService.resolveVoiceAgentConfig();
+        String accountSid = trim(config.twilioAccountSid());
+        String authToken = trim(config.twilioAuthToken());
+
+        if (accountSid.isBlank() || authToken.isBlank()) {
+            throw new IllegalStateException("Twilio integration is not configured.");
+        }
+
+        String twilioUrl = "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + "/Calls/" + callSid.trim() + ".json";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBasicAuth(accountSid, authToken);
+
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(twilioUrl, HttpMethod.GET, new HttpEntity<>(headers), Map.class);
+            Map<?, ?> body = response.getBody() == null ? Map.of() : response.getBody();
+            String status = normalizeStatus(String.valueOf(body.get("status")));
+            String duration = String.valueOf(body.get("duration"));
+
+            communicationRecordRepository
+                .findFirstByChannelIgnoreCaseAndExternalIdOrderByCreatedAtDesc("CALL", callSid.trim())
+                .ifPresent(record -> {
+                    if (!status.isBlank()) {
+                        record.setStatus(status);
+                        communicationRecordRepository.save(record);
+                    }
+                });
+
+            return Map.of(
+                "ok", true,
+                "callSid", callSid.trim(),
+                "status", status,
+                "duration", duration != null && !duration.equals("null") ? duration : "0",
+                "price", String.valueOf(body.get("price")),
+                "to", String.valueOf(body.get("to")),
+                "from", String.valueOf(body.get("from"))
+            );
+        } catch (Exception ex) {
+            return Map.of("ok", false, "callSid", callSid.trim(), "error", ex.getMessage());
+        }
     }
 
     /**

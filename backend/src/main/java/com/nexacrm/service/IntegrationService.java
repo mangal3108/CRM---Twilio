@@ -6,6 +6,7 @@ import com.nexacrm.repository.IntegrationConfigRepository;
 import com.nexacrm.security.CryptoService;
 import com.nexacrm.security.TenantContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -57,6 +58,12 @@ public class IntegrationService {
     private final IntegrationConfigRepository integrationConfigRepository;
     private final CryptoService cryptoService;
     private final RestTemplate restTemplate;
+
+    @Value("${nexacrm.whatsapp.openwa.api-url:http://localhost:2785/api}")
+    private String defaultOpenwaApiUrl;
+
+    @Value("${nexacrm.whatsapp.openwa.api-key:owa_k1_3dd7f106e224ad4e438075dee300c7f664c5d2106779d2058eb3d4792d6037eb}")
+    private String defaultOpenwaApiKey;
 
     private Long tenantId() {
         return TenantContext.currentTenantId();
@@ -282,10 +289,10 @@ public class IntegrationService {
     private Map<String, Object> testWhatsAppConnection(Map<String, String> values) {
         String provider = trim(values.get("provider")).toLowerCase(Locale.ROOT);
         String apiToken = firstNonBlank(values.get("apiToken"), values.get("bearerToken"));
-        if ("aknexus".equals(provider) || !apiToken.isBlank()) {
+        if ("aknexus".equals(provider) && !apiToken.isBlank()) {
             String instanceId = trim(values.get("instanceId"));
-            if (apiToken.isBlank() || instanceId.isBlank()) {
-                throw new IllegalStateException("AKNexus API Token and Instance ID are required.");
+            if (instanceId.isBlank()) {
+                throw new IllegalStateException("AKNexus Instance ID is required.");
             }
 
             String baseUrl = normalizeAknexusBaseUrl(values.get("apiUrl"));
@@ -319,11 +326,44 @@ public class IntegrationService {
             }
         }
 
-        return Map.of(
-            "ok", true,
-            "message", "Connection test passed for whatsapp",
-            "integration", "whatsapp"
-        );
+        // Default: OpenWA Gateway (https://github.com/rmyndharis/OpenWA.git)
+        String baseUrl = firstNonBlank(values.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+
+        String apiKey = firstNonBlank(values.get("apiKey"), defaultOpenwaApiKey);
+        String sessionId = trim(values.get("sessionId"));
+
+        HttpHeaders headers = new HttpHeaders();
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        try {
+            String targetUrl = sessionId.isBlank() ? (baseUrl + "/sessions") : (baseUrl + "/sessions/" + sessionId);
+            ResponseEntity<Object> response = restTemplate.exchange(
+                targetUrl,
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                Object.class
+            );
+
+            return Map.of(
+                "ok", true,
+                "message", "OpenWA WhatsApp Gateway connection verified successfully at " + baseUrl,
+                "integration", "whatsapp",
+                "provider", "openwa",
+                "apiUrl", baseUrl
+            );
+        } catch (HttpStatusCodeException ex) {
+            throw new IllegalStateException("OpenWA connection failed (HTTP " + ex.getStatusCode().value() + "): " + ex.getResponseBodyAsString());
+        } catch (Exception ex) {
+            throw new IllegalStateException("Could not reach OpenWA at " + baseUrl + " (" + ex.getMessage() + "). Please ensure OpenWA server is running on port 2785.");
+        }
     }
 
     private Map<String, Object> testOpenAIConnection(Map<String, String> values) {

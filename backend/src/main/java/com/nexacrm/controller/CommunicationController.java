@@ -66,6 +66,52 @@ public class CommunicationController {
         return ResponseEntity.ok(communicationService.getAllWhatsAppMessages());
     }
 
+    @GetMapping("/whatsapp/openwa/status")
+    @PreAuthorize("hasAuthority('communications.read')")
+    @Operation(summary = "Get OpenWA WhatsApp gateway status and active sessions")
+    public ResponseEntity<Map<String, Object>> getOpenWAStatus() {
+        return ResponseEntity.ok(communicationService.getOpenWAStatus());
+    }
+
+    @PostMapping("/whatsapp/openwa/session/start")
+    @PreAuthorize("hasAuthority('communications.send')")
+    @Operation(summary = "Start or create an OpenWA WhatsApp session")
+    public ResponseEntity<Map<String, Object>> startOpenWASession(@RequestBody(required = false) Map<String, String> body) {
+        String sessionName = body != null ? body.get("name") : null;
+        return ResponseEntity.ok(communicationService.startOpenWASession(sessionName));
+    }
+
+    @GetMapping("/whatsapp/openwa/qr")
+    @PreAuthorize("hasAuthority('communications.read')")
+    @Operation(summary = "Get QR code data URL for session authentication")
+    public ResponseEntity<Map<String, Object>> getOpenWAQRCode(@RequestParam(required = false) String sessionId) {
+        return ResponseEntity.ok(communicationService.getOpenWAQRCode(sessionId));
+    }
+
+    @PostMapping("/whatsapp/openwa/session/logout")
+    @PreAuthorize("hasAuthority('communications.send')")
+    @Operation(summary = "Logout or stop an OpenWA WhatsApp session")
+    public ResponseEntity<Map<String, Object>> logoutOpenWASession(@RequestBody(required = false) Map<String, String> body) {
+        String sessionId = body != null ? body.get("sessionId") : null;
+        return ResponseEntity.ok(communicationService.logoutOpenWASession(sessionId));
+    }
+
+    @PostMapping("/whatsapp/openwa/send")
+    @PreAuthorize("hasAuthority('communications.send')")
+    @Operation(summary = "Send a WhatsApp message directly via OpenWA")
+    public ResponseEntity<Map<String, Object>> sendOpenWAMessage(@RequestBody Map<String, String> body) {
+        String recipient = body.get("recipient");
+        String message = body.get("message");
+        if (recipient == null || recipient.isBlank()) {
+            throw new IllegalArgumentException("Recipient phone number is required.");
+        }
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException("Message text is required.");
+        }
+        communicationService.sendChannelMessage("whatsapp", recipient, null, message);
+        return ResponseEntity.ok(Map.of("ok", true, "message", "WhatsApp message sent successfully"));
+    }
+
     @GetMapping("/facebook/conversations")
     @PreAuthorize("hasAuthority('communications.read')")
     @Operation(summary = "Get Facebook Messenger conversation summaries")

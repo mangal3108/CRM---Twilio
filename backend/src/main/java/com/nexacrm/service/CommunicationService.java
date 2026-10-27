@@ -115,6 +115,12 @@ public class CommunicationService {
     @Value("${nexacrm.whatsapp.aknexus.instance-id:}")
     private String defaultAknexusInstanceId;
 
+    @Value("${nexacrm.whatsapp.openwa.api-url:http://localhost:2785/api}")
+    private String defaultOpenwaApiUrl;
+
+    @Value("${nexacrm.whatsapp.openwa.api-key:owa_k1_3dd7f106e224ad4e438075dee300c7f664c5d2106779d2058eb3d4792d6037eb}")
+    private String defaultOpenwaApiKey;
+
     @Value("${meta.page-access-token:}")
     private String defaultFacebookPageAccessToken;
 
@@ -288,13 +294,12 @@ public class CommunicationService {
         Map<String, String> config = integrationService.getConfig("whatsapp");
         String provider = trim(config.get("provider")).toLowerCase(Locale.ROOT);
         String aknexusToken = firstNonBlank(config.get("apiToken"), config.get("bearerToken"), defaultAknexusApiToken);
-        if ("aknexus".equals(provider)
-            || (!aknexusToken.isBlank() && !"aiadrika".equals(provider) && !"kriscelwa".equals(provider))) {
+        if ("aknexus".equals(provider) && !aknexusToken.isBlank()) {
             sendViaAknexusWhatsAppDocument(number, document, fileName, caption, mediaUrl, config, aknexusToken);
             return;
         }
 
-        throw new IllegalStateException("WhatsApp PDF sending requires the AKNexus provider to be connected.");
+        sendViaOpenWADocument(number, document, fileName, caption, config);
     }
 
     public void sendLeadVoiceCall(
@@ -956,7 +961,7 @@ public class CommunicationService {
 
     private void sendSocialMessage(String channel, String recipient, String body) {
         if ("whatsapp".equals(channel)) {
-            sendViaAiadrikaWhatsApp(recipient, body);
+            sendViaOpenWA(recipient, body);
             return;
         }
 
@@ -986,6 +991,406 @@ public class CommunicationService {
             channel
         );
         notifyOutboundCommunication(channel, recipient, body);
+    }
+
+    public void sendViaOpenWA(String recipient, String body) {
+        String number = recipient == null ? "" : recipient.replaceAll("\\D", "");
+        if (number.isBlank()) {
+            throw new IllegalStateException("Invalid WhatsApp number.");
+        }
+
+        Map<String, String> config = integrationService.getConfig("whatsapp");
+        String provider = trim(config.get("provider")).toLowerCase(Locale.ROOT);
+        String aknexusToken = firstNonBlank(config.get("apiToken"), config.get("bearerToken"), defaultAknexusApiToken);
+        if ("aknexus".equals(provider) && !aknexusToken.isBlank()) {
+            sendViaAknexusWhatsApp(number, body, config, aknexusToken);
+            return;
+        }
+
+        String baseUrl = firstNonBlank(config.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+
+        String apiKey = firstNonBlank(config.get("apiKey"), defaultOpenwaApiKey);
+        String sessionId = trim(config.get("sessionId"));
+        if (sessionId.isBlank()) {
+            sessionId = resolveActiveOpenWASessionId(baseUrl, apiKey);
+        }
+
+        String url = baseUrl + "/sessions/" + sessionId + "/messages/send-text";
+        String chatId = number.contains("@") ? number : (number + "@c.us");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        Map<String, String> payload = new HashMap<>();
+        payload.put("chatId", chatId);
+        payload.put("text", body);
+
+        try {
+            String jsonBody = objectMapper.writeValueAsString(payload);
+            HttpEntity<String> entity = new HttpEntity<>(jsonBody, headers);
+            ResponseEntity<String> responseEntity = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+            String response = responseEntity.getBody();
+            String externalId = null;
+            if (response != null && !response.isBlank()) {
+                Map<String, Object> data = objectMapper.readValue(response, MAP_TYPE);
+                externalId = extractExternalId(objectMapper.valueToTree(data));
+            }
+            tryPersistCommunication("WHATSAPP", "OUT", number, body, "SENT", externalId, response, "openwa");
+            notifyOutboundCommunication("whatsapp", number, body);
+            log.info("WhatsApp sent via OpenWA to {}", number);
+        } catch (HttpStatusCodeException ex) {
+            log.error("OpenWA WhatsApp API error {}: {}", ex.getStatusCode(), ex.getResponseBodyAsString());
+            throw new IllegalStateException("OpenWA WhatsApp API error: " + ex.getResponseBodyAsString());
+        } catch (Exception ex) {
+            log.error("OpenWA send failed: {}", ex.getMessage());
+            throw new IllegalStateException("Failed to send WhatsApp message via OpenWA: " + ex.getMessage());
+        }
+    }
+
+    private void sendViaOpenWADocument(
+        String number,
+        byte[] document,
+        String fileName,
+        String caption,
+        Map<String, String> config
+    ) {
+        String baseUrl = firstNonBlank(config.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+
+        String apiKey = firstNonBlank(config.get("apiKey"), defaultOpenwaApiKey);
+        String sessionId = trim(config.get("sessionId"));
+        if (sessionId.isBlank()) {
+            sessionId = resolveActiveOpenWASessionId(baseUrl, apiKey);
+        }
+
+        String url = baseUrl + "/sessions/" + sessionId + "/messages/send-document";
+        String chatId = number.contains("@") ? number : (number + "@c.us");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        String base64Data = "data:application/pdf;base64," + java.util.Base64.getEncoder().encodeToString(document);
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("chatId", chatId);
+        payload.put("document", base64Data);
+        payload.put("filename", (fileName == null || fileName.isBlank()) ? "document.pdf" : fileName);
+        if (caption != null && !caption.isBlank()) {
+            payload.put("caption", caption);
+        }
+
+        try {
+            String jsonBody = objectMapper.writeValueAsString(payload);
+            HttpEntity<String> entity = new HttpEntity<>(jsonBody, headers);
+            ResponseEntity<String> responseEntity = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+            String response = responseEntity.getBody();
+            String externalId = null;
+            if (response != null && !response.isBlank()) {
+                Map<String, Object> data = objectMapper.readValue(response, MAP_TYPE);
+                externalId = extractExternalId(objectMapper.valueToTree(data));
+            }
+            String activity = (caption == null || caption.isBlank()) ? fileName : caption;
+            tryPersistCommunication("WHATSAPP", "OUT", number, activity, "SENT", externalId, response, "openwa");
+            notifyOutboundCommunication("whatsapp", number, activity);
+            log.info("WhatsApp PDF sent via OpenWA to {}", number);
+        } catch (HttpStatusCodeException ex) {
+            log.error("OpenWA WhatsApp document API error {}: {}", ex.getStatusCode(), ex.getResponseBodyAsString());
+            throw new IllegalStateException("OpenWA WhatsApp PDF API error: " + ex.getResponseBodyAsString());
+        } catch (Exception ex) {
+            log.error("OpenWA WhatsApp document send failed: {}", ex.getMessage());
+            throw new IllegalStateException("Failed to send WhatsApp PDF via OpenWA: " + ex.getMessage());
+        }
+    }
+
+    public String resolveActiveOpenWASessionId(String baseUrl, String apiKey) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            if (apiKey != null && !apiKey.isBlank()) {
+                headers.set("X-API-Key", apiKey);
+            }
+            ResponseEntity<List> response = restTemplate.exchange(
+                baseUrl + "/sessions",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                List.class
+            );
+            List<?> sessions = response.getBody();
+            if (sessions != null && !sessions.isEmpty()) {
+                for (Object item : sessions) {
+                    if (item instanceof Map<?, ?> map) {
+                        String status = String.valueOf(map.get("status"));
+                        String id = String.valueOf(map.get("id"));
+                        if ("ready".equalsIgnoreCase(status) || "qr_ready".equalsIgnoreCase(status) || "authenticated".equalsIgnoreCase(status)) {
+                            return id;
+                        }
+                    }
+                }
+                Object first = sessions.get(0);
+                if (first instanceof Map<?, ?> map) {
+                    return String.valueOf(map.get("id"));
+                }
+            }
+        } catch (Exception ex) {
+            log.debug("Could not resolve active OpenWA session: {}", ex.getMessage());
+        }
+        return "nexacrm";
+    }
+
+    public Map<String, Object> getOpenWAStatus() {
+        Map<String, String> config = integrationService.getConfig("whatsapp");
+        String baseUrl = firstNonBlank(config.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+        String apiKey = firstNonBlank(config.get("apiKey"), defaultOpenwaApiKey);
+        String configuredSessionId = trim(config.get("sessionId"));
+
+        HttpHeaders headers = new HttpHeaders();
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        try {
+            ResponseEntity<List> response = restTemplate.exchange(
+                baseUrl + "/sessions",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                List.class
+            );
+            List<?> sessions = response.getBody() == null ? List.of() : response.getBody();
+            Map<String, Object> activeSession = null;
+            boolean connected = false;
+
+            for (Object s : sessions) {
+                if (s instanceof Map<?, ?> map) {
+                    Map<String, Object> copy = new LinkedHashMap<>();
+                    map.forEach((k, v) -> copy.put(String.valueOf(k), v));
+                    String id = String.valueOf(copy.get("id"));
+                    String status = String.valueOf(copy.get("status"));
+
+                    if (!configuredSessionId.isBlank() && configuredSessionId.equalsIgnoreCase(id)) {
+                        activeSession = copy;
+                        if ("ready".equalsIgnoreCase(status)) connected = true;
+                        break;
+                    }
+                    if ("ready".equalsIgnoreCase(status)) {
+                        activeSession = copy;
+                        connected = true;
+                        break;
+                    } else if (activeSession == null) {
+                        activeSession = copy;
+                    }
+                }
+            }
+
+            String currentStatus = activeSession != null ? String.valueOf(activeSession.get("status")) : (sessions.isEmpty() ? "no_sessions" : "idle");
+
+            return Map.of(
+                "gatewayOnline", true,
+                "connected", connected,
+                "status", currentStatus,
+                "apiUrl", baseUrl,
+                "activeSession", activeSession != null ? activeSession : Map.of(),
+                "sessions", sessions,
+                "message", connected ? "OpenWA WhatsApp is connected and ready to send messages." : "OpenWA Gateway is online. Session status: " + currentStatus
+            );
+        } catch (Exception ex) {
+            return Map.of(
+                "gatewayOnline", false,
+                "connected", false,
+                "status", "offline",
+                "apiUrl", baseUrl,
+                "error", ex.getMessage() != null ? ex.getMessage() : "Unreachable",
+                "message", "OpenWA Gateway is currently offline or unreachable at " + baseUrl
+            );
+        }
+    }
+
+    public Map<String, Object> startOpenWASession(String sessionName) {
+        Map<String, String> config = integrationService.getConfig("whatsapp");
+        String baseUrl = firstNonBlank(config.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+        String apiKey = firstNonBlank(config.get("apiKey"), defaultOpenwaApiKey);
+        String name = (sessionName == null || sessionName.isBlank()) ? "nexacrm" : sessionName.trim();
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        String targetSessionId = null;
+        try {
+            ResponseEntity<List> listResp = restTemplate.exchange(
+                baseUrl + "/sessions",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                List.class
+            );
+            List<?> list = listResp.getBody();
+            if (list != null) {
+                for (Object item : list) {
+                    if (item instanceof Map<?, ?> m) {
+                        if (name.equalsIgnoreCase(String.valueOf(m.get("name")))) {
+                            targetSessionId = String.valueOf(m.get("id"));
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (targetSessionId == null) {
+            try {
+                Map<String, String> createPayload = Map.of("name", name);
+                ResponseEntity<Map> createResp = restTemplate.exchange(
+                    baseUrl + "/sessions",
+                    HttpMethod.POST,
+                    new HttpEntity<>(createPayload, headers),
+                    Map.class
+                );
+                if (createResp.getBody() != null) {
+                    targetSessionId = String.valueOf(createResp.getBody().get("id"));
+                }
+            } catch (Exception ex) {
+                log.warn("Session create error: {}", ex.getMessage());
+            }
+        }
+
+        if (targetSessionId == null) {
+            targetSessionId = name;
+        }
+
+        try {
+            ResponseEntity<Map> startResp = restTemplate.exchange(
+                baseUrl + "/sessions/" + targetSessionId + "/start",
+                HttpMethod.POST,
+                new HttpEntity<>(Map.of(), headers),
+                Map.class
+            );
+            return Map.of(
+                "ok", true,
+                "sessionId", targetSessionId,
+                "sessionName", name,
+                "status", "starting",
+                "details", startResp.getBody() == null ? Map.of() : startResp.getBody()
+            );
+        } catch (Exception ex) {
+            log.error("Start session failed: {}", ex.getMessage());
+            return Map.of(
+                "ok", false,
+                "sessionId", targetSessionId,
+                "error", ex.getMessage() != null ? ex.getMessage() : "Failed to start session"
+            );
+        }
+    }
+
+    public Map<String, Object> getOpenWAQRCode(String sessionId) {
+        Map<String, String> config = integrationService.getConfig("whatsapp");
+        String baseUrl = firstNonBlank(config.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+        String apiKey = firstNonBlank(config.get("apiKey"), defaultOpenwaApiKey);
+        String targetId = sessionId;
+        if (targetId == null || targetId.isBlank()) {
+            targetId = resolveActiveOpenWASessionId(baseUrl, apiKey);
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        try {
+            ResponseEntity<Map> resp = restTemplate.exchange(
+                baseUrl + "/sessions/" + targetId + "/qr",
+                HttpMethod.GET,
+                new HttpEntity<>(headers),
+                Map.class
+            );
+            Map<?, ?> body = resp.getBody() == null ? Map.of() : resp.getBody();
+            Object qrCodeVal = body.get("qrCode");
+            Object statusVal = body.get("status");
+            return Map.of(
+                "ok", true,
+                "sessionId", targetId,
+                "qrCode", qrCodeVal != null ? String.valueOf(qrCodeVal) : "",
+                "status", statusVal != null ? String.valueOf(statusVal) : "qr_ready"
+            );
+        } catch (HttpStatusCodeException ex) {
+            return Map.of(
+                "ok", false,
+                "sessionId", targetId,
+                "error", ex.getResponseBodyAsString(),
+                "status", "not_ready"
+            );
+        } catch (Exception ex) {
+            return Map.of(
+                "ok", false,
+                "sessionId", targetId,
+                "error", ex.getMessage() != null ? ex.getMessage() : "Error getting QR code",
+                "status", "error"
+            );
+        }
+    }
+
+    public Map<String, Object> logoutOpenWASession(String sessionId) {
+        Map<String, String> config = integrationService.getConfig("whatsapp");
+        String baseUrl = firstNonBlank(config.get("apiUrl"), defaultOpenwaApiUrl, "http://localhost:2785/api");
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        if (!baseUrl.contains("/api")) {
+            baseUrl = baseUrl + "/api";
+        }
+        String apiKey = firstNonBlank(config.get("apiKey"), defaultOpenwaApiKey);
+        String targetId = (sessionId == null || sessionId.isBlank()) ? resolveActiveOpenWASessionId(baseUrl, apiKey) : sessionId;
+
+        HttpHeaders headers = new HttpHeaders();
+        if (!apiKey.isBlank()) {
+            headers.set("X-API-Key", apiKey);
+        }
+
+        try {
+            restTemplate.exchange(
+                baseUrl + "/sessions/" + targetId + "/logout",
+                HttpMethod.POST,
+                new HttpEntity<>(Map.of(), headers),
+                Map.class
+            );
+            return Map.of("ok", true, "message", "Session logged out successfully");
+        } catch (Exception ex) {
+            return Map.of("ok", false, "error", ex.getMessage() != null ? ex.getMessage() : "Logout failed");
+        }
     }
 
     private void sendViaAiadrikaWhatsApp(String recipient, String body) {
@@ -1960,7 +2365,7 @@ public class CommunicationService {
         }
     }
 
-    private String escapeXml(String text) {
+    public String escapeXml(String text) {
         if (text == null) return "";
         return text.replace("&", "&amp;")
                    .replace("<", "&lt;")
@@ -1980,7 +2385,7 @@ public class CommunicationService {
         }
     }
 
-    private String resolveCallAgentWebhookUrl(VoiceAgentConfig config) {
+    public String resolveCallAgentWebhookUrl(VoiceAgentConfig config) {
         String candidate = firstNonBlank(
             config.callbackWebhookUrl(),
             config.webhookUrl()
@@ -2523,7 +2928,7 @@ public class CommunicationService {
         );
     }
 
-    private String normalizePhoneForCall(String raw) {
+    public String normalizePhoneForCall(String raw) {
         String value = trim(raw);
         if (value.isBlank()) {
             return "";
@@ -2698,7 +3103,7 @@ public class CommunicationService {
         communicationRecordRepository.save(record);
     }
 
-    private boolean tryPersistCommunication(
+    public boolean tryPersistCommunication(
         String channel,
         String direction,
         String contactIdentifier,
@@ -2711,7 +3116,7 @@ public class CommunicationService {
         return tryPersistCommunication(channel, direction, contactIdentifier, body, status, externalId, rawPayload, provider, null, null);
     }
 
-    private boolean tryPersistCommunication(
+    public boolean tryPersistCommunication(
         String channel,
         String direction,
         String contactIdentifier,
@@ -2736,7 +3141,7 @@ public class CommunicationService {
         );
     }
 
-    private boolean tryPersistCommunication(
+    public boolean tryPersistCommunication(
         String channel,
         String direction,
         String contactIdentifier,

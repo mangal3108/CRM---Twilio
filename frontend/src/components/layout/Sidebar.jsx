@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { NavLink, Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, Kanban, UserCircle, MessageSquare,
+  LayoutDashboard, Users, Kanban, UserCircle, MessageSquare, MessageCircle,
   Sparkles, Zap, BarChart3, Shield, Settings,
   X, ListTodo, ShieldCheck, Activity, Building2, BadgeDollarSign,
-  Lock, FileText, Menu
+  Lock, FileText, Menu, PhoneCall
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { useNotificationStore } from '../../store/notificationStore'
@@ -19,6 +19,8 @@ const NAV_ITEMS = [
   { label: 'Pipeline',       icon: Kanban,          path: '/pipeline', permission: PERMISSIONS.LEADS_READ },
   { label: 'Tasks',          icon: ListTodo,        path: '/task-followup', permission: PERMISSIONS.TASKS_READ },
   { label: 'Customers',      icon: UserCircle,      path: '/customers', permission: PERMISSIONS.CUSTOMERS_READ },
+  { label: 'Phone Dialer',   icon: PhoneCall,       path: '/dialer', permission: PERMISSIONS.COMMUNICATIONS_READ },
+  { label: 'WhatsApp',       icon: MessageCircle,   path: '/whatsapp', permission: PERMISSIONS.COMMUNICATIONS_READ },
   { label: 'Messages',       icon: MessageSquare,   path: '/communication', permission: PERMISSIONS.COMMUNICATIONS_READ },
   { label: 'AI Engine',      icon: Sparkles,        path: '/ai-engine', permission: PERMISSIONS.AI_USE },
   { label: 'Automation',     icon: Zap,             path: '/automation', permission: PERMISSIONS.AUTOMATION_READ },

@@ -75,28 +75,27 @@ const INTEGRATIONS = [
     Icon: () => <svg viewBox="0 0 24 24" fill="none" className="w-7 h-7"><circle cx="12" cy="12" r="10" fill="#FF4500"/><path d="M16.58 14.38c.07.32.11.64.11.97 0 2.1-2.1 3.8-4.69 3.8-2.59 0-4.69-1.7-4.69-3.8 0-.33.04-.65.12-.97a1.5 1.5 0 1 1 .97-2.28 6.15 6.15 0 0 1 3.6-1.16c1.34 0 2.59.44 3.6 1.16a1.5 1.5 0 1 1 .98 2.28Z" fill="white"/><circle cx="10.14" cy="14.07" r=".9" fill="#FF4500"/><circle cx="13.86" cy="14.07" r=".9" fill="#FF4500"/><path d="M10.2 16.18c.43.34 1.03.54 1.8.54.77 0 1.37-.2 1.8-.54" stroke="#FF4500" strokeWidth="1.1" strokeLinecap="round"/><path d="m14.97 9.74.6-2.08 1.8.42" stroke="white" strokeWidth="1.1" strokeLinecap="round"/></svg>,
   },
   {
-    id: 'whatsapp', name: 'WhatsApp Business', category: 'Messaging',
-    tagline: 'Send WhatsApp messages via AKNexus',
-    description: 'Connect your AKNexus WhatsApp instance to send messages directly from NexaCRM, workflows, lead automation, and the communication inbox.',
-    features: ['AKNexus API sending', 'Workflow WhatsApp actions', 'Lead auto-welcome messages', 'Legacy provider support'],
+    id: 'whatsapp', name: 'OpenWA (WhatsApp Gateway)', category: 'Messaging',
+    tagline: 'Self-hosted OpenWA WhatsApp API Gateway',
+    description: 'Connect OpenWA (rmyndharis/OpenWA) to send WhatsApp messages, sync chats, authenticate sessions via QR code, and trigger automated welcome/follow-up messages.',
+    features: ['OpenWA API Gateway', 'QR Code session authentication', 'Direct WhatsApp inbox & chat', 'Lead auto-welcome messages', 'Automated workflows & webhooks'],
     color: '#25D366', bg: '#F0FFF4',
     authType: 'apikey',
-    docsUrl: 'https://app.aknexus.in/api_automation/docs',
+    docsUrl: 'https://github.com/rmyndharis/OpenWA',
     defaultValues: {
-      provider: 'aknexus',
-      apiUrl: 'https://app.aknexus.in/api/v2',
-      instanceId: '6A9FAD7115E71',
-      senderNumber: '919971364324',
+      provider: 'openwa',
+      apiUrl: 'http://localhost:2785/api',
+      apiKey: 'owa_k1_3dd7f106e224ad4e438075dee300c7f664c5d2106779d2058eb3d4792d6037eb',
+      sessionId: 'nexacrm',
+      senderNumber: '919876543210',
     },
     fields: [
-      { key: 'provider',     label: 'Provider',                          placeholder: 'aknexus', hint: 'Use aknexus for app.aknexus.in; legacy values kriscelwa and aiadrika still work.' },
-      { key: 'apiUrl',       label: 'API Base URL',                      placeholder: 'https://app.aknexus.in/api/v2', hint: 'AKNexus API base URL from API & Automation docs.' },
-      { key: 'apiToken',     label: 'AKNexus API Token',                 placeholder: 'wz_...', secret: true, hint: 'Create in AKNexus → API & Automation → Tokens.' },
-      { key: 'instanceId',   label: 'AKNexus Instance ID',               placeholder: '6A9FAD7115E71', hint: 'From AKNexus /api/v2/whatsapp/instances.' },
-      { key: 'senderNumber', label: 'Default Sender Number (optional)',  placeholder: '919971364324' },
-      { key: 'apiKey',       label: 'Legacy Kriscel WA API Key',         placeholder: 'owa_k1_...', secret: true, hint: 'Only for provider=kriscelwa.' },
-      { key: 'sessionId',    label: 'Legacy Kriscel WA Session ID',      placeholder: 'my-crm-session', hint: 'Only for provider=kriscelwa.' },
-      { key: 'accessToken',  label: 'Legacy Aiadrika Access Token',      placeholder: 'token...', secret: true, hint: 'Only for provider=aiadrika.' },
+      { key: 'provider',     label: 'Provider (openwa, aknexus)', placeholder: 'openwa', hint: 'Default is openwa (rmyndharis/OpenWA).' },
+      { key: 'apiUrl',       label: 'OpenWA API Base URL', placeholder: 'http://localhost:2785/api', hint: 'Default is http://localhost:2785/api for local OpenWA gateway.' },
+      { key: 'apiKey',       label: 'OpenWA API Key (X-API-Key)', placeholder: 'API_MASTER_KEY (optional for dev)', secret: true, hint: 'Set if API_MASTER_KEY is configured in OpenWA .env.' },
+      { key: 'sessionId',    label: 'Session Name or ID (optional)', placeholder: 'nexacrm', hint: 'Defaults to active session or nexacrm.' },
+      { key: 'senderNumber', label: 'Default Sender Number (optional)', placeholder: '919876543210' },
+      { key: 'webhookSecret',label: 'Webhook Secret (optional)', placeholder: 'whsec_...', secret: true, hint: 'Secret token configured in OpenWA webhook notifications.' },
     ],
     Icon: () => <svg viewBox="0 0 24 24" fill="#25D366" className="w-7 h-7"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>,
   },
@@ -296,28 +295,14 @@ function SetupModal({ integration, onClose }) {
 
   const getVisibleFields = () => {
     if (integration.id === 'whatsapp') {
-      const baseKeys = ['provider', 'senderNumber']
-      const aknexusKeys = ['apiUrl', 'apiToken', 'instanceId']
-      const kriscelKeys = ['apiUrl', 'apiKey', 'sessionId']
-      const aiadrikaKeys = ['apiUrl', 'instanceId', 'accessToken']
-      const providerKeys = providerMode === 'kriscelwa'
-        ? kriscelKeys
-        : providerMode === 'aiadrika'
-          ? aiadrikaKeys
-          : aknexusKeys
-      return integration.fields.filter(f => [...baseKeys, ...providerKeys].includes(f.key))
+      return integration.fields
     }
     return integration.fields
   }
 
   const getRequiredFields = () => {
     if (integration.id === 'whatsapp') {
-      const requiredKeys = providerMode === 'kriscelwa'
-        ? ['provider', 'apiKey', 'sessionId']
-        : providerMode === 'aiadrika'
-          ? ['provider', 'apiUrl', 'instanceId', 'accessToken']
-          : ['provider', 'apiUrl', 'apiToken', 'instanceId']
-      return integration.fields.filter(f => requiredKeys.includes(f.key))
+      return integration.fields.filter(f => f.key === 'apiUrl')
     }
 
     if (integration.id !== 'voice_call_agent') {
